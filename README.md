@@ -1,175 +1,91 @@
 # Berlin Property Lead Intelligence
 
-**Python data pipeline and Streamlit dashboard** for preparing, reviewing and visualizing Berlin property-management lead candidates.
+**Heidi Systems case study** — bilingual Streamlit dashboard (English / Deutsch), Inter typeface, light blue theme, lead qualification methodology, candidate explorer, quality controls, and CSV/Google Sheets export.
 
-This project complements **`Berlin_Agent`**, the separate Node.js scraping/enrichment agent built with Stagehand and Groq. It does not run or modify that agent.
+The application is **read-only**. Opening the dashboard never runs Stagehand, Groq, OpenAI, or `pipeline.py`. There is no CSV upload control.
 
-> **Important:** Automatically identified companies are **candidates, not verified leads**. The scoring model is illustrative and is not an official Heidi Systems methodology.
-
-## Objectives
-
-1. Load the agent's `checkpoint_latest.json`.
-2. Incorporate **147 previously collected public-directory candidates** from `data/raw/directory_candidates.csv`.
-3. Normalize company information and deduplicate using the **company website domain**, where available. A directory or listing platform must not be counted as an individual company.
-4. Separate candidates into qualified, manual-review and excluded groups; produce quality indicators and score ranges.
-5. Explore the results through a local Streamlit dashboard.
-
-## Project structure
+## Files to deploy
 
 ```text
-Berlin_Property_Lead_Intelligence/
-├── app.py
-├── pipeline.py
-├── requirements.txt
-├── README.md
-├── tests/
-└── data/
-    ├── raw/
-    │   ├── checkpoint_latest.json         # Supplied locally; not committed
-    │   └── directory_candidates.csv      # Supplied locally; not committed
-    ├── processed/                         # Generated locally; not committed
-    │   ├── leads_all.csv
-    │   ├── leads_qualified.csv
-    │   ├── leads_review.csv
-    │   ├── leads_excluded.csv
-    │   └── quality_report.json
-    └── public/
-        └── leads_public.csv               # Optional: manually reviewed, safe to publish
+app.py
+pipeline.py                         # scorer imported by the app; no pipeline run
+requirements.txt
+.streamlit/config.toml
+data/public/leads_public.csv        # public dashboard data, semicolon CSV
+data/public/leads_public_google.csv # public Google Sheets CSV, comma separated
+publish_public.py                  # regeneration tool; not executed by visitors
 ```
 
-The folders under `data/` may need to be created manually. The raw inputs and generated outputs are **not included** in the public repository.
+The public data currently contains **392 research candidates**, not 392 independently verified property managers. It excludes email addresses, telephone numbers, and personal contacts. Verify sources, accuracy, and publication rights before publishing.
 
-## Prerequisites
-
-- Python 3.10 or later (subject to the versions supported by `requirements.txt`).
-- Windows PowerShell (commands below); equivalent commands work on macOS/Linux.
-- A local `Berlin_Agent` directory containing `output/checkpoint_latest.json`.
-- The previously collected `directory_candidates.csv` file.
-
-## Local installation (Windows PowerShell)
-
-Create or open the analytics project as a **sibling** of `Berlin_Agent`:
-
-```text
-workspace/
-├── Berlin_Agent/
-└── Berlin_Property_Lead_Intelligence/
-```
-
-From `Berlin_Property_Lead_Intelligence`, run:
+## Run locally (Windows, PowerShell)
 
 ```powershell
-# 1. Create and activate a virtual environment
 py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# 2. Install dependencies
-python -m pip install -r requirements.txt
-
-# 3. Create input/output directories
-New-Item -ItemType Directory -Force .\data\raw, .\data\processed, .\data\public | Out-Null
-
-# 4. Copy the latest checkpoint from the separate scraping agent
-Copy-Item ..\Berlin_Agent\output\checkpoint_latest.json .\data\raw\checkpoint_latest.json
-
-# 5. Copy your previously collected candidate CSV into data/raw/
-#    (Replace the source path with its actual location.)
-Copy-Item C:\path\to\directory_candidates.csv .\data\raw\directory_candidates.csv
-
-# 6. Run automated tests
-python -m unittest discover -s tests -v
-
-# 7. Generate processed datasets
-python pipeline.py
-
-# 8. Launch the dashboard
-streamlit run app.py
-```
-
-Open the local address printed by Streamlit (commonly `http://localhost:8501`).
-
-**PowerShell activation blocked?** Use `.\.venv\Scripts\python.exe` instead of `python` in the commands above. To launch Streamlit without activation:
-
-```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-## Pipeline outputs
+Visit `http://localhost:8501` (or the port printed in your terminal).
 
-After `python pipeline.py` finishes successfully, inspect:
+## Deploy on Streamlit Community Cloud
 
-| File | Description |
-| --- | --- |
-| `data/processed/leads_all.csv` | Combined candidate records |
-| `data/processed/leads_qualified.csv` | Candidates meeting the pipeline's qualification rules; **not manually verified** |
-| `data/processed/leads_review.csv` | Records requiring manual review |
-| `data/processed/leads_excluded.csv` | Excluded records |
-| `data/processed/quality_report.json` | Data-quality and processing summary |
+1. Create a GitHub repository for the **dashboard** (separate from the Node.js scraper), such as `berlin-property-lead-dashboard`.
+2. Push the files listed above. **Never push `.env`, private leads, `data/raw/`, `data/processed/`, `data/validation/`, API keys, or personal-contact exports.**
+3. Open https://share.streamlit.io, create an app from your GitHub repository, select branch `main` and entry point `app.py`.
+4. The dashboard uses `data/public/leads_public.csv` by default. No API key or secrets are required to display it.
+5. Test all four pages in **English and German**, the exported CSV, and the Google Sheets section.
 
-**Verification:** Check the row counts, exclusion reasons, duplicate handling and `quality_report.json` before using the results for outreach or reporting.
+## Google Sheets — two supported paths
 
-## Illustrative lead scoring
+### A. First-time setup without a Google API key
 
-The model uses the following maximum contributions:
+From the dashboard's **Companies & Export** page:
 
-| Criterion | Maximum points |
-| --- | ---: |
-| Property-management fit | 30 |
-| Confirmed number of managed units | 25 |
-| Berlin activity | 15 |
-| Metering / utility-billing relevance | 20 |
-| Contactability | 10 |
-| **Total** | **100** |
+1. Select **Create a Google Sheet** (opens `https://sheets.new`).
+2. Either download the **Google Sheets-compatible CSV** (comma-delimited), then in Google Sheets use **File → Import → Upload**, or use the automatic link in step 3.
+3. To link a publicly hosted CSV, make sure `data/public/leads_public_google.csv` exists on your **public GitHub repository**, then set this in Streamlit Cloud app settings → **Secrets**:
 
-- `score_min` reflects supported evidence.
-- `score_max` also includes points that remain possible because information is unknown.
-- Unknown portfolio size is **not** interpreted as zero managed units.
-- A Berlin directory address alone is only partial evidence of operational presence.
-- Data quality and verification status are separate from the score.
+   ```toml
+   PUBLIC_CSV_URL = "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/data/public/leads_public_google.csv"
+   ```
 
-These scores support **prioritization only**, not a claim of eligibility or business suitability.
+   After redeploying, the app shows a formula you can copy into cell A1 of a **new, empty** Google Sheet:
 
-## Data quality, verification and privacy
+   ```gs
+   =IMPORTDATA("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/data/public/leads_public_google.csv")
+   ```
 
-- All automatically suggested leads remain `NOT_MANUALLY_VERIFIED` until checked by a person.
-- Directory-only candidates must not be labeled as directly scraped from company websites.
-- A citation or generated statement from Groq is not independent proof that a listing represents a distinct company.
-- Manually validate official company websites, business activity, duplicate entities and supporting evidence before publishing or contacting leads.
-- Do not publish personal contact details, internal checkpoints, unreviewed exports or information collected against applicable terms or privacy requirements.
-- The dashboard should omit email addresses and phone numbers from both **on-screen tables and downloads**; confirm this behavior before sharing access.
+   The CSV URL must be publicly reachable. This feature imports **only the public dataset**. Google may cache the imported contents; updates are not necessarily immediate.
+4. Name the resulting Sheet and, if sharing with recruiters, configure the appropriate **Share → General access → Anyone with the link → Viewer** permission deliberately.
 
-To reduce the risk of accidental publication, add the following rules to `.gitignore`:
+### B. One-click opening on subsequent visits
 
-```gitignore
-.venv/
-__pycache__/
-*.py[cod]
-.streamlit/secrets.toml
-/data/raw/
-/data/processed/
+Set the URL of your prepared Google Sheet in Streamlit Cloud app settings → **Secrets**:
+
+```toml
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
 ```
 
-Only intentionally reviewed and business-safe data should be saved to `data/public/leads_public.csv`.
+The dashboard will then show **Open in Google Sheets / In Google Tabellen öffnen**, opening **that existing spreadsheet directly**.
 
-## Deploying to Streamlit Community Cloud
+**Not supported without Google OAuth:** silently creating a new spreadsheet inside each visitor's personal Google Drive. The app does not claim to do this. Google Sheets opening is separate from the download action and does not create a new sheet each click.
 
-1. Push `app.py`, `pipeline.py` (if the app imports it), `requirements.txt`, `README.md`, and other required **non-sensitive code files** to GitHub.
-2. If the deployed dashboard needs sample data, include only a **manually reviewed** `data/public/leads_public.csv`.
-3. Ensure `app.py` can read the public CSV when local `data/processed` files are absent. **A local-only data path will not work on Streamlit Community Cloud.**
-4. Open [Streamlit Community Cloud](https://share.streamlit.io), select the repository and choose `app.py` as the entry point.
-5. Open the deployed app and verify that raw data, internal checkpoints, emails, phone numbers and unreviewed records are not accessible in tables, charts or downloads.
+## Updating the research data
 
-Do **not** upload private `data/raw/` or `data/processed/` content to GitHub simply to make the deployment run.
-
-## Refreshing the local dataset
-
-After running the separate Node.js agent again, update the local checkpoint and rerun the analytics pipeline:
+In your **private** analytics project (not on Streamlit Cloud), run:
 
 ```powershell
-Copy-Item ..\Berlin_Agent\output\checkpoint_latest.json .\data\raw\checkpoint_latest.json -Force
-python -m unittest discover -s tests -v
 python pipeline.py
-streamlit run app.py
+python publish_public.py --confirm
 ```
 
-This refreshes the local analytics outputs. It does not change `Berlin_Agent`, and it does **not** automatically update the public deployment: publish an independently reviewed export for that purpose.
+This generates **both** `leads_public.csv` and `leads_public_google.csv`. Carefully inspect them, then copy the sanitized files to this public dashboard repository and commit/push. Streamlit Cloud will update to the new Git commit. A formula using `IMPORTDATA` will eventually load updated public data when Google refreshes it.
+
+## Privacy and verification
+
+- `PUBLIC_MODE` defaults to `true`. Do not set `PUBLIC_MODE=false` in Streamlit Cloud.
+- No individual email addresses or named contacts are included in this public export.
+- The Google Sheets link and formula expose the **full public dataset**, not any temporary filtered selection in Streamlit. Download the filtered CSV if you need only the selected rows.
+- `EVIDENCE_CHECKED` means text support was found; it is **not** a human verification.
+- National portfolio totals must not be described as Berlin-only housing units.

@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-11-10T02:44:56.194161+00:00",
+  "unique_candidates": 392,
+  "classification": {
+    "REVIEW": 268,
+    "LIKELY": 112,
+    "EXCLUDED": 12
+  },
+  "priority": {
+    "VERIFY_COMPANY": 268,
+    "RESEARCH_MORE": 64,
+    "MEDIUM": 45,
+    "EXCLUDED": 12,
+    "HIGH": 3
+  },
+  "scraped_ok": 117,
+  "ai_evidence_checked": 55,
+  "companies_with_email": 171,
+  "unverified_directory_only": 272,
+  "web_reviewed": 10,
+  "manual_review_remaining": 382,
+  "units_reported": 6,
+  "note": "Automated qualification only. Evidence status does not imply human verification.",
+  "validation_integration": {
+    "applied": 10,
+    "matched_domains": [
+      "zbvv.de",
+      "hochheiden-hausverwaltung.de",
+      "optimus-hv.de",
+      "kdb-immo.de",
+      "quiess-immobilien.de",
+      "berlin.optima-gmbh.de",
+      "hausverwalter-berlin.de",
+      "delo-berlin.de",
+      "cenes-hausverwaltung.de",
+      "homewise.de"
+    ],
+    "unmatched": [],
+    "pending_ignored": 25
+  },
+  "source_mode": "checkpoint_and_directory",
+  "methodology_version": "2.0"
+}

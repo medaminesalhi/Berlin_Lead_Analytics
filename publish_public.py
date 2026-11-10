@@ -10,6 +10,7 @@ from pipeline import ROOT, csv_safe
 
 SOURCE = ROOT / "data" / "processed" / "leads_all.csv"
 DEST = ROOT / "data" / "public" / "leads_public.csv"
+GOOGLE_DEST = ROOT / "data" / "public" / "leads_public_google.csv"
 PUBLIC_FIELDS = [
     "company_name", "website", "domain", "management_type", "units_managed",
     "units_scope", "metering_signal", "berlin_signal", "score_min", "score_max",
@@ -24,7 +25,11 @@ def create_public(source: Path = SOURCE, destination: Path = DEST):
     columns = [column for column in PUBLIC_FIELDS if column in data.columns]
     safe = data[columns].copy()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    csv_safe(safe).to_csv(destination, sep=";", encoding="utf-8-sig", index=False)
+    secured = csv_safe(safe)
+    secured.to_csv(destination, sep=";", encoding="utf-8-sig", index=False)
+    # Google Sheets IMPORTDATA supports comma-delimited CSV, not our semicolon UI export.
+    google_dest = destination.parent / "leads_public_google.csv"
+    secured.to_csv(google_dest, sep=",", encoding="utf-8-sig", index=False)
     return len(safe), columns
 
 
@@ -36,4 +41,5 @@ if __name__ == "__main__":
         parser.error("Ajoute --confirm après avoir décidé de préparer une copie publique sans coordonnées.")
     count, cols = create_public()
     print(f"Fichier public PRÉPARÉ (non publié) : {DEST}")
+    print(f"CSV Google Sheets PRÉPARÉ : {GOOGLE_DEST}")
     print(f"{count} candidats, {len(cols)} colonnes. Vérifier avant de pousser sur GitHub.")

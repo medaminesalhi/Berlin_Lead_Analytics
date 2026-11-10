@@ -1,10 +1,16 @@
-.venv/
-__pycache__/
-*.pyc
+# Exclude local data, secrets and build artifacts
 .env
+.env.*
+!.env.example
 .streamlit/secrets.toml
-data/raw/*.json
-data/raw/*.csv
-data/processed/
-!data/raw/.gitkeep
-# Add data/public/leads_public.csv only after manual verification.
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db
+
+backup/
+# data/public/leads_public.csv is intentionally included for deployment

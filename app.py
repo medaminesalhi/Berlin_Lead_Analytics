@@ -1,621 +1,664 @@
-"""Berlin Property Lead Intelligence — light Times New Roman Streamlit dashboard.
+"""Berlin Property Lead Intelligence — bilingual, read-only Streamlit dashboard.
 
-Four pages: executive overview, KPI methodology, full explorer, data quality.
-Public deployments read only curated data/public/leads_public.csv.
+Public mode always uses a curated contact-free CSV. No uploading or scraping.
+Google Sheets: open a preconfigured live Sheet, or import a publicly hosted CSV
+via =IMPORTDATA(). Creating Sheets in the visitor's Drive needs OAuth and is
+intentionally not attempted by this application.
 """
 from __future__ import annotations
 
 import html
 import os
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from pipeline import compute_score_from_fields, csv_safe
 
 ROOT = Path(__file__).resolve().parent
-LOCAL = ROOT / "data" / "processed" / "leads_all.csv"
-PUBLIC = ROOT / "data" / "public" / "leads_public.csv"
-REPORT = ROOT / "data" / "processed" / "quality_report.json"
+PUBLIC = ROOT / "data/public/leads_public.csv"
+LOCAL = ROOT / "data/processed/leads_all.csv"
+BLUE = "#1768C8"
+DARK = "#163967"
+LIGHT = "#9DBDE8"
+PALE = "#DAE8F9"
+MUTED = "#7D9CC2"
+GREY = "#BDC9D8"
+COLORS = {
+    "LIKELY": BLUE, "REVIEW": LIGHT, "EXCLUDED": GREY,
+    "HIGH": BLUE, "MEDIUM": "#4A86CF", "RESEARCH_MORE": MUTED,
+    "VERIFY_COMPANY": LIGHT,
+}
 
-NAVY = "#142E55"
-TEAL = "#1754AB"
-BLUE = "#4B8CE4"
-AMBER = "#86ACDD"
-ROSE = "#B3BBC9"
-SLATE = "#94A7C1"
-PALETTE = {
-    "LIKELY": TEAL, "REVIEW": AMBER, "EXCLUDED": ROSE,
-    "HIGH": TEAL, "MEDIUM": BLUE, "RESEARCH_MORE": SLATE,
-    "VERIFY_COMPANY": AMBER, "EXCLUDED_PRIORITY": ROSE,
+I18N = {
+ "en": {
+    "language": "Language / Sprache", "nav_overview": "Overview", "nav_kpis": "Methodology & KPIs",
+    "nav_explorer": "Companies & Export", "nav_quality": "Data Quality & Validation",
+    "project": "BERLIN PROPERTY LEAD INTELLIGENCE", "case": "HEIDI SYSTEMS · CASE STUDY",
+    "source": "Dataset", "public_dataset": "Curated public dataset", "private_dataset": "Local processed dataset",
+    "total_base": "Records", "sidebar_export": "DOWNLOAD RESEARCH RESULTS",
+    "sidebar_caption": "Read-only dashboard. No CSV upload, scraping or API calls.",
+    "sidebar_csv": "Download all results (CSV)", "method_note": "Automated candidate assessment; not an independently verified client list.",
+    "overview_kicker": "HEIDI SYSTEMS · B2B MARKET INTELLIGENCE",
+    "overview_title": "Berlin Property Lead Intelligence",
+    "overview_desc": "From web discovery to property-manager qualification: commercial fit, evidence, data coverage and transparent research sources.",
+    "candidates": "Consolidated candidates", "candidates_note": "After merging and deduplication",
+    "likely": "Likely property managers", "likely_note": "Automated qualification or web review",
+    "visited": "Websites visited", "visited_note": "Stagehand / Chromium browsing",
+    "reviewed": "Web-reviewed records", "reviewed_note": "Documented checks, some with reservations",
+    "exports": "EXPORT RESEARCH DATA", "exports_desc": "Download a spreadsheet-ready CSV. Personal contacts are excluded from public exports.",
+    "download_all": "Download full dataset (CSV)", "download_likely": "Download likely leads (CSV)",
+    "snapshot": "RESEARCH SNAPSHOT", "classification_breakdown": "Candidate classification",
+    "priority_chart": "Commercial priorities", "records": "records",
+    "coverage": "Data coverage & completeness", "scraping_rate": "Website coverage",
+    "ai_evidence": "LLM text evidence", "units_count": "Portfolio figures available",
+    "review_count": "Requires company review", "caution": "A text quote matched by an LLM is not human verification. A Berlin address alone does not prove Berlin property operations.",
+    "top_companies": "High-potential candidates to examine",
+    "kpis_kicker": "TRANSPARENT LEAD QUALIFICATION", "kpis_title": "Methodology & KPIs",
+    "kpis_desc": "How candidates are discovered, cleaned, classified and scored. Missing information increases uncertainty instead of being treated as zero.",
+    "steps_title": "Five-stage research workflow", "steps": [
+      ("Discovery", "SearXNG and public directories discover candidate property-management firms in Berlin."),
+      ("Browser research", "Stagehand/Chromium visit permitted pages, including About, Contact and Services."),
+      ("AI enrichment", "Groq extracts management categories and figures; evidence text is checked against captured pages."),
+      ("Data consolidation", "Python standardizes names, merges domains, and separates directory listings from real companies."),
+      ("Lead qualification", "Explicit commercial KPIs produce a minimum–maximum score alongside separate verification statuses."),
+    ],
+    "kpi_score_title": "Lead scoring framework · 100 points", "kpi_cards": [
+      ("Property-management fit", 30, "Does the firm actually manage buildings?", "Residential / WEG: 30; mixed: 25; general: 20; commercial: 10; sales-only: 0."),
+      ("Managed portfolio", 25, "Number of managed units indicates potential scale.", ">1,000: 25; 501–1,000: 19; 101–500: 13; 1–100: 5; unpublished: unknown."),
+      ("Berlin operations", 15, "Does it manage properties in the target geography?", "Confirmed service area: 15; directory address only: 7–15; unknown: 0–15."),
+      ("Metering / billing fit", 20, "Heating, utility allocation and charges are relevant needs.", "Explicit metering: 20; service-charge billing: 12–20; unknown: 0–20."),
+      ("Business contactability", 10, "How easily can the team reach the firm?", "Named work contact: 8–10; generic email: 5–10; phone: 3–10; unknown: 0–10."),
+    ],
+    "rule": "Rule", "reading_scores": "Understanding the score range",
+    "min_explain": "Minimum score: points supported by the available information (which can still require review).",
+    "max_explain": "Maximum score: the upper bound if currently missing data prove favorable.",
+    "score_example": "Example: 65–90 / 100 reflects 65 currently supported points and 25 uncertain points, not a confirmed score of 90.",
+    "priority_rules": "HIGH: minimum score ≥75; MEDIUM: 45–74; RESEARCH_MORE: below 45. REVIEW always requires a company check.",
+    "sim_title": "Interactive scoring example", "sim_type": "Management type", "sim_units": "Portfolio size",
+    "sim_berlin": "Berlin operations", "sim_meter": "Metering / billing evidence", "sim_contact": "Contact availability",
+    "sim_score": "Estimated score", "simulation_note": "Illustrative inputs, not an actual company record.",
+    "limits_title": "What this model does not claim", "limits": [
+       "Unknown values are not invented or automatically converted to zero.",
+       "Portfolio figures may refer to Germany rather than Berlin; scope must be checked.",
+       "EVIDENCE_CHECKED indicates a matching text excerpt, not independent verification.",
+       "Directories and non-target businesses must not be counted as property managers.",
+       "Web reviews can still contain legal-name or geographic reservations.",
+    ],
+    "explorer_kicker": "COMPLETE RESEARCH DATABASE", "explorer_title": "Companies & Export",
+    "explorer_desc": "Explore all consolidated records, including uncertain and excluded candidates. Filter by score or status, review sources, and export data.",
+    "search": "Search", "search_ph": "Company, domain, address...", "classification": "Classification",
+    "priority": "Priority", "reviewed_only": "Web-reviewed only", "management": "Management type",
+    "minimum": "Minimum score", "sort": "Sort by", "sort_options": ["Highest minimum score", "Highest maximum score", "Company A–Z", "Web-reviewed first"],
+    "showing": "{n} selected records out of {total}; filters are applied immediately.",
+    "download_selection": "Download filtered results (CSV)", "download_complete": "Download complete results (CSV)",
+    "sheet_section": "GOOGLE SHEETS", "sheet_title": "Open the dataset in Google Sheets",
+    "sheet_desc": "The shared Google Sheet contains the full public dataset, not the current filtered selection.",
+    "sheet_open": "Open in Google Sheets", "sheet_create": "Create a Google Sheet",
+    "sheet_ready": "Download Google Sheets-compatible CSV", "sheet_instructions": "First-time setup: open a blank Sheet and import the downloaded CSV with File → Import → Upload, or paste the formula below into cell A1 to load the public dataset.",
+    "sheet_formula": "Paste this into cell A1 in a new Google Sheet:",
+    "sheet_config": "For a one-click link on future visits, set GOOGLE_SHEET_URL in your deployment settings to the URL of your prepared Google Sheet.",
+    "sheet_url_missing": "No public CSV URL configured yet. Upload the Google Sheets-compatible CSV manually, or set PUBLIC_CSV_URL to the public raw CSV URL in GitHub.",
+    "sheet_public_note": "Only the sanitized public dataset is used for Google Sheets. Private work emails and contacts are never transferred by this feature.",
+    "all_data": "Company results", "units_note": "* Managed-unit numbers are reported with scope; nationwide figures are not Berlin-only counts.",
+    "private_export": "Private internal export with business contacts", "private_note": "For local authorized use only; do not publish on GitHub.",
+    "private_button": "Download internal contacts (CSV)", "public_note": "Public downloads exclude direct email addresses and individual contacts.",
+    "details": "Company profile", "pick_company": "Choose a company", "no_companies": "No records match these filters.",
+    "activity": "Activity", "reason": "Classification rationale", "scope": "Portfolio scope",
+    "review_state": "Web review status", "min_metric": "Minimum score", "max_metric": "Maximum possible score",
+    "open_website": "Visit official website", "open_source": "Review supporting source",
+    "not_documented": "Not documented", "unverified": "Not verified",
+    "quality_kicker": "DATA PROVENANCE & VALIDATION", "quality_title": "Data Quality & Validation",
+    "quality_desc": "See missing data, actual site coverage, AI evidence status and records that still require human verification.",
+    "checks": "Groq evidence matches", "checks_note": "Text evidence, not a human check",
+    "exclusions": "Out-of-scope records", "exclusions_note": "Directories, articles or non-target sites",
+    "waiting": "Not web-reviewed", "waiting_note": "Still require a review if used commercially",
+    "quality_provenance": "Source quality", "ai_status": "AI analysis status",
+    "field_coverage": "Coverage of essential fields", "fields": ["Company", "Website", "Business email", "Portfolio size", "Source URL"],
+    "anomalies": "Records requiring attention", "review_caution": "Uncertain records remain visible to avoid incorrectly excluding valid companies.",
+    "not_available": "Not provided", "col_company": "Company", "col_website": "Official website", "col_type": "Management",
+    "col_units": "Managed units*", "col_scope": "Geographic scope", "col_min": "Min. score", "col_max": "Max. score",
+    "col_priority": "Priority", "col_class": "Classification", "col_review": "Review status", "col_source": "Evidence source",
+    "types": {"residential": "Residential / WEG", "mixed": "Mixed", "commercial": "Commercial", "sales_only": "Sales only", "management_unspecified": "General management", "unknown": "Unknown", "": "Unknown"},
+    "classes": {"LIKELY": "Likely property manager", "REVIEW": "Needs verification", "EXCLUDED": "Out of scope"},
+    "priorities": {"HIGH": "High", "MEDIUM": "Medium", "RESEARCH_MORE": "Research more", "VERIFY_COMPANY": "Verify company", "EXCLUDED": "Excluded"},
+    "sim_units_options": {"unknown": "Unpublished", "small": "50 units", "medium": "350 units", "large": "2,000 units"},
+    "sim_berlin_options": {"WEB_REVIEW_BERLIN": "Confirmed", "DIRECTORY_ADDRESS": "Directory address only", "UNKNOWN": "Unknown"},
+    "sim_meter_options": {"CONFIRMED_TEXT": "Metering evidence", "BILLING_TEXT": "Service-charge billing", "UNKNOWN": "Unknown"},
+    "sim_contact_options": {"named": "Named work email", "generic": "General business email", "phone": "Phone only", "none": "Unavailable"},
+ },
+ "de": {
+    "language": "Sprache / Language", "nav_overview": "Übersicht", "nav_kpis": "Methodik & KPIs",
+    "nav_explorer": "Unternehmen & Export", "nav_quality": "Datenqualität & Prüfung",
+    "project": "BERLIN PROPERTY LEAD INTELLIGENCE", "case": "HEIDI SYSTEMS · FALLSTUDIE",
+    "source": "Datensatz", "public_dataset": "Öffentlicher Forschungsdatensatz", "private_dataset": "Lokaler Arbeitsdatensatz",
+    "total_base": "Datensätze", "sidebar_export": "ERGEBNISSE HERUNTERLADEN",
+    "sidebar_caption": "Nur Lesezugriff. Kein CSV-Upload, Scraping oder API-Aufruf.",
+    "sidebar_csv": "Alle Ergebnisse als CSV", "method_note": "Automatische Vorqualifizierung; keine vollständig unabhängig bestätigte Kundenliste.",
+    "overview_kicker": "HEIDI SYSTEMS · B2B-MARKTANALYSE",
+    "overview_title": "Berlin Property Lead Intelligence",
+    "overview_desc": "Von der Websuche zur Qualifizierung von Hausverwaltungen: Marktpotenzial, Belege, Datenabdeckung und nachvollziehbare Quellen.",
+    "candidates": "Zusammengeführte Kandidaten", "candidates_note": "Nach Zusammenführung und Dublettenabgleich",
+    "likely": "Wahrscheinliche Hausverwaltungen", "likely_note": "Automatische Einstufung oder Webprüfung",
+    "visited": "Besuchte Websites", "visited_note": "Navigation mit Stagehand / Chromium",
+    "reviewed": "Im Web geprüfte Einträge", "reviewed_note": "Dokumentierte Prüfungen, teilweise mit Vorbehalt",
+    "exports": "RECHERCHEERGEBNISSE EXPORTIEREN", "exports_desc": "CSV für Tabellenkalkulationen herunterladen; persönliche Kontaktdaten sind im öffentlichen Export nicht enthalten.",
+    "download_all": "Gesamte Datenbank als CSV", "download_likely": "Wahrscheinliche Leads als CSV",
+    "snapshot": "RECHERCHEÜBERBLICK", "classification_breakdown": "Kandidaten nach Kategorie",
+    "priority_chart": "Vertriebliche Prioritäten", "records": "Einträge",
+    "coverage": "Datenabdeckung und Reifegrad", "scraping_rate": "Website-Abdeckung",
+    "ai_evidence": "KI-Textbelege", "units_count": "Portfolioangaben verfügbar",
+    "review_count": "Unternehmen prüfen", "caution": "Ein von der KI gefundener Textbeleg ist keine unabhängige Prüfung. Eine Adresse in Berlin beweist nicht die Verwaltung von Objekten vor Ort.",
+    "top_companies": "Vorrangige Kandidaten zur Prüfung",
+    "kpis_kicker": "TRANSPARENTE LEAD-QUALIFIZIERUNG", "kpis_title": "Methodik & KPIs",
+    "kpis_desc": "So werden Unternehmen gefunden, bereinigt, klassifiziert und bewertet. Fehlende Informationen erzeugen Unsicherheit statt automatisch null Punkte.",
+    "steps_title": "Fünf Phasen des Workflows", "steps": [
+      ("Recherche", "SearXNG und öffentliche Verzeichnisse identifizieren potenzielle Berliner Hausverwaltungen."),
+      ("Browser-Recherche", "Stagehand/Chromium besucht zulässige Webseiten, zum Beispiel Über uns, Kontakt und Leistungen."),
+      ("KI-Anreicherung", "Groq extrahiert Kategorien und Zahlen. Textbelege werden mit dem Seiteninhalt abgeglichen."),
+      ("Datenkonsolidierung", "Python standardisiert Namen, führt Domains zusammen und trennt Verzeichnisse von Unternehmen."),
+      ("Lead-Qualifizierung", "Transparente KPIs liefern einen Mindest- und Höchstwert sowie einen separaten Prüfstatus."),
+    ],
+    "kpi_score_title": "Scoring-Modell · 100 Punkte", "kpi_cards": [
+      ("Passung der Verwaltung", 30, "Verwaltet das Unternehmen tatsächlich Gebäude?", "Wohnen / WEG: 30; gemischt: 25; allgemein: 20; gewerblich: 10; nur Verkauf: 0."),
+      ("Verwalteter Bestand", 25, "Anzahl verwalteter Einheiten als Indikator für das Potenzial.", ">1.000: 25; 501–1.000: 19; 101–500: 13; 1–100: 5; unbekannt: offen."),
+      ("Tätigkeit in Berlin", 15, "Betreut die Gesellschaft Objekte im Zielmarkt?", "Bestätigte Tätigkeit: 15; nur Verzeichnisadresse: 7–15; unbekannt: 0–15."),
+      ("Verbrauch / Abrechnung", 20, "Heizkosten, Betriebskosten und Verbrauchserfassung zeigen mögliche Bedarfe.", "Direkte Belege: 20; Nebenkostenabrechnung: 12–20; unbekannt: 0–20."),
+      ("Geschäftlicher Kontakt", 10, "Wie leicht kann die Gesellschaft kontaktiert werden?", "Namentlicher Kontakt: 8–10; allgemeine E-Mail: 5–10; Telefon: 3–10; unbekannt: 0–10."),
+    ],
+    "rule": "Regel", "reading_scores": "So lesen Sie den Score",
+    "min_explain": "Mindestwert: Punkte, die durch vorhandene Informationen gestützt werden (ggf. noch prüfpflichtig).",
+    "max_explain": "Höchstwert: erreichbarer Wert, wenn die noch fehlenden Angaben günstig ausfallen.",
+    "score_example": "Beispiel: 65–90 / 100 bedeutet 65 aktuell gestützte und 25 unsichere Punkte, keinen bestätigten Wert von 90.",
+    "priority_rules": "HIGH: Mindestwert ≥75; MEDIUM: 45–74; RESEARCH_MORE: unter 45. REVIEW erfordert unabhängig vom Score eine Prüfung.",
+    "sim_title": "Interaktives Scoring-Beispiel", "sim_type": "Verwaltungsart", "sim_units": "Bestandsgröße",
+    "sim_berlin": "Tätigkeit in Berlin", "sim_meter": "Belege zu Abrechnung / Verbrauch", "sim_contact": "Kontaktmöglichkeiten",
+    "sim_score": "Geschätzter Score", "simulation_note": "Beispieldaten, keine echte Gesellschaft.",
+    "limits_title": "Grenzen der Auswertung", "limits": [
+       "Fehlende Angaben werden nicht erfunden oder automatisch mit null bewertet.",
+       "Bestandszahlen können bundesweit statt nur in Berlin gelten; der Geltungsbereich muss geprüft werden.",
+       "EVIDENCE_CHECKED bedeutet Textabgleich, nicht unabhängige Faktenprüfung.",
+       "Verzeichnisse und fachfremde Websites dürfen nicht als Hausverwaltungen gezählt werden.",
+       "Webprüfungen können weiterhin Vorbehalte zur Firma oder zum Geschäftsgebiet enthalten.",
+    ],
+    "explorer_kicker": "VOLLSTÄNDIGE RECHERCHE-DATENBANK", "explorer_title": "Unternehmen & Export",
+    "explorer_desc": "Alle zusammengeführten Datensätze mit Unsicherheiten und Ausschlüssen. Nach Scores und Status filtern, Quellen prüfen und CSV exportieren.",
+    "search": "Suche", "search_ph": "Firma, Domain, Adresse...", "classification": "Klassifikation",
+    "priority": "Priorität", "reviewed_only": "Nur Web-geprüfte Einträge", "management": "Verwaltungsart",
+    "minimum": "Mindest-Score", "sort": "Sortieren nach", "sort_options": ["Höchster Mindest-Score", "Höchster Höchst-Score", "Unternehmen A–Z", "Web-geprüfte zuerst"],
+    "showing": "{n} von {total} Einträgen ausgewählt; Filter wirken sofort.",
+    "download_selection": "Gefilterte Auswahl als CSV", "download_complete": "Vollständige Datenbank als CSV",
+    "sheet_section": "GOOGLE TABELLEN", "sheet_title": "Datensatz in Google Tabellen öffnen",
+    "sheet_desc": "Die freigegebene Tabelle enthält den vollständigen öffentlichen Datensatz, nicht die aktuelle Filterauswahl.",
+    "sheet_open": "In Google Tabellen öffnen", "sheet_create": "Google-Tabelle erstellen",
+    "sheet_ready": "Google-Tabellen-kompatible CSV laden", "sheet_instructions": "Ersteinrichtung: Leere Tabelle öffnen und die CSV über Datei → Importieren → Hochladen laden, oder die Formel unten in Zelle A1 einfügen.",
+    "sheet_formula": "Diese Formel in Zelle A1 einer neuen Tabelle einfügen:",
+    "sheet_config": "Für einen Direktlink bei zukünftigen Besuchen GOOGLE_SHEET_URL in den Deployment-Einstellungen auf die vorbereitete Google-Tabelle setzen.",
+    "sheet_url_missing": "Noch keine öffentliche CSV-URL eingestellt. CSV manuell importieren oder PUBLIC_CSV_URL auf die öffentliche Raw-CSV-URL im GitHub-Repository setzen.",
+    "sheet_public_note": "Google Tabellen erhält nur die bereinigten öffentlichen Daten. Private E-Mails und persönliche Kontaktdaten werden von dieser Funktion nicht übertragen.",
+    "all_data": "Unternehmensübersicht", "units_note": "* Bestandszahlen enthalten ihren Geltungsbereich; bundesweite Werte sind keine reinen Berliner Zahlen.",
+    "private_export": "Interner Export mit Geschäftskontakten", "private_note": "Nur für berechtigte lokale Nutzung; nicht auf GitHub veröffentlichen.",
+    "private_button": "Internen Kontakt-CSV herunterladen", "public_note": "Öffentliche Downloads enthalten keine direkten E-Mails oder persönlichen Ansprechpartner.",
+    "details": "Unternehmensprofil", "pick_company": "Unternehmen auswählen", "no_companies": "Keine Einträge für diese Filter.",
+    "activity": "Tätigkeit", "reason": "Begründung der Einstufung", "scope": "Geltungsbereich",
+    "review_state": "Status der Webprüfung", "min_metric": "Mindest-Score", "max_metric": "Maximaler Score",
+    "open_website": "Offizielle Website öffnen", "open_source": "Belegquelle öffnen",
+    "not_documented": "Nicht dokumentiert", "unverified": "Nicht geprüft",
+    "quality_kicker": "DATENHERKUNFT & PRÜFUNG", "quality_title": "Datenqualität & Prüfung",
+    "quality_desc": "Transparenter Überblick über fehlende Daten, besuchte Websites, KI-Belege und verbleibende manuelle Prüfungen.",
+    "checks": "Abgeglichene Groq-Belege", "checks_note": "Textbeleg statt unabhängiger Prüfung",
+    "exclusions": "Nicht passende Datensätze", "exclusions_note": "Verzeichnisse, Artikel oder fachfremde Seiten",
+    "waiting": "Nicht im Web geprüft", "waiting_note": "Vor geschäftlicher Nutzung weiterhin prüfen",
+    "quality_provenance": "Quellenqualität", "ai_status": "Status der KI-Analyse",
+    "field_coverage": "Abdeckung zentraler Felder", "fields": ["Firmenname", "Website", "Geschäfts-E-Mail", "Bestandsgröße", "Quellenlink"],
+    "anomalies": "Einträge mit Handlungsbedarf", "review_caution": "Unklare Einträge bleiben sichtbar, damit valide Unternehmen nicht vorschnell ausgeschlossen werden.",
+    "not_available": "Keine Angabe", "col_company": "Unternehmen", "col_website": "Offizielle Website", "col_type": "Verwaltung",
+    "col_units": "Verwaltete Einheiten*", "col_scope": "Geltungsbereich", "col_min": "Min. Score", "col_max": "Max. Score",
+    "col_priority": "Priorität", "col_class": "Einstufung", "col_review": "Prüfstatus", "col_source": "Belegquelle",
+    "types": {"residential": "Wohnen / WEG", "mixed": "Gemischt", "commercial": "Gewerblich", "sales_only": "Nur Verkauf", "management_unspecified": "Allgemeine Verwaltung", "unknown": "Unbekannt", "": "Unbekannt"},
+    "classes": {"LIKELY": "Wahrscheinliche Hausverwaltung", "REVIEW": "Prüfung erforderlich", "EXCLUDED": "Nicht passend"},
+    "priorities": {"HIGH": "Hoch", "MEDIUM": "Mittel", "RESEARCH_MORE": "Mehr recherchieren", "VERIFY_COMPANY": "Unternehmen prüfen", "EXCLUDED": "Ausgeschlossen"},
+    "sim_units_options": {"unknown": "Nicht veröffentlicht", "small": "50 Einheiten", "medium": "350 Einheiten", "large": "2.000 Einheiten"},
+    "sim_berlin_options": {"WEB_REVIEW_BERLIN": "Bestätigt", "DIRECTORY_ADDRESS": "Nur Verzeichnisadresse", "UNKNOWN": "Unbekannt"},
+    "sim_meter_options": {"CONFIRMED_TEXT": "Verbrauchsbelege", "BILLING_TEXT": "Nebenkostenabrechnung", "UNKNOWN": "Unbekannt"},
+    "sim_contact_options": {"named": "Personalisierte Geschäfts-E-Mail", "generic": "Allgemeine Geschäfts-E-Mail", "phone": "Nur Telefon", "none": "Nicht verfügbar"},
+ }
 }
-CLASS_FR = {"LIKELY": "Prospect probable", "REVIEW": "À vérifier", "EXCLUDED": "Hors cible"}
-PRIORITY_FR = {
-    "HIGH": "Haute", "MEDIUM": "Moyenne", "RESEARCH_MORE": "À enrichir",
-    "VERIFY_COMPANY": "Vérifier l'entreprise", "EXCLUDED": "Exclu",
-}
-TYPE_FR = {
-    "residential": "Résidentiel / WEG", "mixed": "Mixte", "commercial": "Commercial",
-    "management_unspecified": "Gestion non précisée", "sales_only": "Transaction uniquement",
-    "unknown": "Inconnu", "": "Inconnu",
-}
-KPI = [
-    {"title": "Adéquation métier", "points": 30, "why": "La société gère-t-elle réellement des immeubles ?", "how": "WEG / résidentiel : 30 · mixte : 25 · gestion générale : 20 · commercial : 10 · vente seule : 0"},
-    {"title": "Portefeuille géré", "points": 25, "why": "Nombre d'unités administrées, indicateur de potentiel commercial.", "how": "> 1 000 : 25 · 501–1 000 : 19 · 101–500 : 13 · 1–100 : 5 · non publié : inconnu"},
-    {"title": "Présence à Berlin", "points": 15, "why": "Un prospect pertinent doit gérer des biens dans le marché visé.", "how": "Site ou revue web : 15 · adresse d'annuaire seulement : 7–15 · non démontré : 0–15"},
-    {"title": "Comptage et charges", "points": 20, "why": "Décomptes de chauffage, charges et suivi des consommations sont des signaux de besoin.", "how": "Preuve de comptage : 20 · mention de décompte de charges : 12–20 · inconnu : 0–20"},
-    {"title": "Contactabilité", "points": 10, "why": "Facilité à joindre l'entreprise pour la prospection B2B.", "how": "Email nominatif professionnel : 8–10 · email générique : 5–10 · téléphone : 3–10 · inconnu : 0–10"},
-]
 
-st.set_page_config(page_title="Berlin Property Lead Intelligence | Heidi Systems", page_icon="🏙️", layout="wide", initial_sidebar_state="expanded")
-st.markdown("""
-<style>
-/* Berlin Property Lead Intelligence — light editorial theme */
-:root {
-  color-scheme: light;
-  --bpli-ink: #142E55;
-  --bpli-secondary: #435C7A;
-  --bpli-border: #DCE5EF;
-  --bpli-paper: #FFFFFF;
-  --bpli-page: #F5F8FF;
-  --bpli-accent: #1768C8;
+st.set_page_config(page_title="Berlin Property Lead Intelligence | Heidi Systems", layout="wide", initial_sidebar_state="expanded")
+st.markdown("""<style>
+:root {--ink:#142E55;--muted:#4B6480;--accent:#1768C8;--paper:#FFF;--page:#F4F8FF;}
+html,body,.stApp,[data-testid="stSidebar"],.stApp p,.stApp label,.stApp input,
+.stApp button,.stApp h1,.stApp h2,.stApp h3,.stApp h4,
+[data-testid="stMetricValue"],[data-testid="stMetricLabel"] {
+  font-family:"Inter","Segoe UI",Arial,sans-serif !important;
 }
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"] {
-  font-family: "Times New Roman", Times, serif !important;
-  color: var(--bpli-ink) !important;
-}
-.stApp, [data-testid="stAppViewContainer"] {
-  background: radial-gradient(ellipse 860px 410px at 92% 4%, #EAF3FA 0%, transparent 70%), var(--bpli-page) !important;
-  color: var(--bpli-ink) !important;
-}
-/* Native Streamlit text and widgets */
-.stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
-.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5,
-[data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] button, [data-testid="stSidebar"] input,
-[data-testid="stMetricLabel"], [data-testid="stMetricValue"],
-[data-testid="stMarkdownContainer"] {
-  font-family: "Times New Roman", Times, serif !important;
-}
-.stApp h1, .stApp h2, .stApp h3, .stApp h4,
-[data-testid="stMarkdownContainer"] strong {color: #142E55;}
-.stApp p, .stApp label {color: #2E4359;}
-.stApp small, [data-testid="stCaptionContainer"] {color: #516B88 !important;}
-.block-container {padding-top: 1.6rem; padding-bottom: 4rem; max-width: 1500px;}
-/* Sidebar: readable contrast in all navigation and input states */
-[data-testid="stSidebar"] {
-  background: #FFFFFF !important;
-  border-right: 1px solid #D5E1ED !important;
-  box-shadow: 3px 0 24px rgba(30,64,103,.035);
-}
-[data-testid="stSidebar"] [data-testid="stSidebarContent"] {padding-top: 1.05rem;}
-[data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
-  color: #253B52 !important;
-  opacity: 1 !important;
-}
-[data-testid="stSidebarNav"]::before {
-  content: "BERLIN LEAD INTELLIGENCE";
-  display: block;
-  margin: 0 14px 7px;
-  font-family: "Times New Roman", Times, serif;
-  font-size: 18px;
-  line-height: 1.22;
-  letter-spacing: .35px;
-  font-weight: 700;
-  color: #153C70;
-}
-[data-testid="stSidebarNav"]::after {
-  content: "HEIDI SYSTEMS  ·  CASE STUDY";
-  display: block;
-  margin: 12px 14px 17px;
-  font-family: "Times New Roman", Times, serif;
-  font-size: 11px;
-  letter-spacing: 1.15px;
-  font-weight: 700;
-  color: #647991;
-}
-[data-testid="stSidebarNav"] a, [data-testid="stSidebarNav"] button {
-  color: #233B55 !important;
-  font-family: "Times New Roman", Times, serif !important;
-  font-size: 16px !important;
-  font-weight: 600;
-  border-radius: 10px !important;
-  opacity: 1 !important;
-}
-[data-testid="stSidebarNav"] a:hover, [data-testid="stSidebarNav"] button:hover {
-  background: #E9F3FF !important;
-  color: #1353A3 !important;
-}
+.stApp, [data-testid="stAppViewContainer"] {background:var(--page);color:var(--ink);}
+[data-testid="stSidebar"] {background:#fff !important;border-right:1px solid #D9E5F3;}
+[data-testid="stSidebar"] p,[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] button,[data-testid="stSidebar"] [data-testid="stMarkdownContainer"]{color:#203C5B !important;opacity:1 !important;}
+[data-testid="stSidebarNav"] a {border-radius:10px !important;color:#274866 !important;font-weight:600;}
+[data-testid="stSidebarNav"] a:hover {background:#EAF3FF !important;}
 [data-testid="stSidebarNav"] a[aria-current="page"],
-[data-testid="stSidebarNav"] a[aria-selected="true"],
-[data-testid="stSidebarNav"] a[data-active="true"] {
-  background: #E4F0FF !important;
-  color: #1353A3 !important;
-  font-weight: 700 !important;
-  border-left: 3px solid #1768C8;
-}
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
-  background: #F7FAFD !important;
-  border: 1px dashed #ADC4D7 !important;
-  border-radius: 12px;
-}
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] * {color:#304760 !important;}
-[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="input"] > div {
-  background: #FFFFFF !important;
-  color: #20384F !important;
-  border: 1px solid #C8D8E7 !important;
-}
-[data-testid="stSidebar"] hr {border-color: #DCE6EF !important;}
-/* Editorial header and readable statistics */
-.hero {
-  padding: 29px 33px 28px;
-  border: 1px solid #C8DBEA;
-  border-radius: 18px;
-  background: linear-gradient(120deg, #FFFFFF 0%, #F1F7FF 52%, #E0EDFF 100%);
-  box-shadow: 0 7px 26px rgba(37,76,117,.06);
-  margin: 0 0 24px;
-}
-.eyebrow {font-size:12px; letter-spacing:1.7px; color:#1768C8; text-transform:uppercase; font-weight:700;}
-.hero h1 {font-size:clamp(30px,3.3vw,43px); font-weight:700; color:#153C70; line-height:1.15; margin:12px 0 12px;}
-.hero p {color:#49627A; font-size:16px; line-height:1.55; max-width:880px; margin-bottom:0;}
-.stat {
-  background:#FFFFFF;
-  border:1px solid #D8E3ED;
-  padding:18px 20px 17px;
-  border-radius:14px;
-  min-height:130px;
-  box-shadow: 0 4px 14px rgba(28,64,101,.04);
-}
-.stat .label {font-size:14px; color:#496078; letter-spacing:.1px; font-weight:600;}
-.stat .number {font-size:35px; font-weight:700; color:#183C70; line-height:1.45;}
-.stat .note {font-size:12px; color:#657B92; line-height:1.45;}
-.section-eyebrow {font-size:12px; color:#135CB5; font-weight:700; letter-spacing:1.5px; margin:16px 0 8px;}
-.inline-panel {background:#FFFFFF; border:1px solid #D8E3ED; padding:17px 21px; border-radius:13px; margin:11px 0;}
-.inline-panel p {color:#405971; font-size:15px; line-height:1.52; margin:8px 0;}
-.kpi-card {background:#FFFFFF; border:1px solid #D8E3ED; padding:18px; border-radius:13px; margin-bottom:12px; min-height:148px;}
-.kpi-card h4 {margin:0 0 8px; font-size:19px; color:#143862;}
-.kpi-card p {font-size:14px; line-height:1.55; color:#4B627A; margin:5px 0;}
-.kpi-card .score {font-weight:700; font-size:21px; color:#1768C8; float:right;}
-.small-muted {font-size:13px; color:#546B81; margin:8px 0 21px;}
-[data-testid="stMetric"] {background:#FFFFFF; border:1px solid #D8E3ED; border-radius:13px; padding:16px;}
-[data-testid="stMetricValue"] {color:#183C70 !important;}
-[data-testid="stMetricLabel"] {color:#435C7A !important;}
-[data-testid="stDataFrame"] {background:#FFFFFF; border:1px solid #D9E4EF; border-radius:12px; overflow:hidden;}
-[data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] {border-color:#D9E4EF;}
-/* Buttons, menus and form controls */
-[data-testid="stBaseButton-primary"] {
-  background-color:#1768C8 !important; border-color:#1768C8 !important; color:#FFFFFF !important;
-}
-[data-testid="stBaseButton-primary"]:hover {background-color:#0F4FA6 !important;}
-[data-testid="stBaseButton-primary"] p,
-[data-testid="stBaseButton-primary"] span {color:#FFFFFF !important;}
-[data-testid="stDownloadButton"] button {border-radius:10px; font-weight:700; min-height:44px;}
-[data-testid="stDownloadButton"] button[kind="primary"] {background:#1768C8 !important; color:#FFFFFF !important; border-color:#1768C8 !important;}
-[data-testid="stDownloadButton"] button[kind="primary"] p {color:#FFFFFF !important;}
-[data-testid="stFileUploader"] {margin-bottom:.45rem;}
-.export-panel {background:#FFFFFF; border:1px solid #C9DBF4; border-radius:14px; padding:12px 17px; margin:11px 0 13px;}
-.export-panel strong {color:#154785; font-size:17px;}
-.export-panel p {color:#4E6581; margin:4px 0 0; font-size:14px;}
-[data-baseweb="select"] div, [data-baseweb="input"] input {color:#23394F;}
-/* Retain Streamlit icon glyph fonts; do not override Material Symbols. */
-</style>
-""", unsafe_allow_html=True)
+[data-testid="stSidebarNav"] a[aria-selected="true"] {background:#E1EEFE !important;color:#1558AD !important;border-left:3px solid #1768C8;}
+.block-container {max-width:1480px;padding-top:1.7rem;padding-bottom:4rem;}
+.hero {background:linear-gradient(120deg,#fff,#EEF5FF 75%,#E5F0FF);
+ border:1px solid #C9DCF3;border-radius:18px;padding:28px 32px;margin-bottom:23px;
+ box-shadow:0 7px 24px rgba(34,77,129,.045);}
+.hero h1 {font-size:clamp(28px,3.5vw,44px);color:#173E71;line-height:1.17;margin:10px 0 11px;font-weight:750;}
+.hero p {font-size:16px;line-height:1.55;color:#44617F;margin:0;max-width:950px;}
+.eyebrow {font-size:11px;font-weight:750;letter-spacing:1.4px;color:#1768C8;}
+.stat {background:#fff;border:1px solid #D9E5F3;border-radius:14px;padding:19px 20px;
+ min-height:136px;box-shadow:0 4px 14px rgba(28,74,122,.04);}
+.stat .label {font-size:13px;font-weight:650;color:#4D6480;}
+.stat .number {font-size:36px;font-weight:760;color:#163D74;line-height:1.45;}
+.stat .note {font-size:12px;color:#67809D;line-height:1.43;}
+.section-label {font-size:11px;font-weight:750;letter-spacing:1.45px;color:#1768C8;margin:18px 0 9px;}
+.info-card,.kpi-card {background:white;border:1px solid #D9E5F3;border-radius:13px;padding:18px 20px;margin:10px 0;}
+.kpi-card h4 {margin:0 0 7px;font-size:17px;color:#163D72;}
+.kpi-card p,.info-card p {font-size:14px;line-height:1.55;color:#4C6281;margin:6px 0;}
+.kpi-card .score {font-size:20px;font-weight:700;color:#1768C8;float:right;}
+.small-print {font-size:13px;color:#607892;margin:13px 0 21px;}
+[data-testid="stMetric"] {background:white;border:1px solid #D9E5F3;border-radius:13px;padding:15px;}
+[data-testid="stMetricValue"] {color:#163D74 !important;}
+[data-testid="stDataFrame"] {border:1px solid #D9E5F3;border-radius:11px;overflow:hidden;}
+[data-testid="stDownloadButton"] button {min-height:44px;border-radius:10px;font-weight:680;}
+[data-testid="stBaseButton-primary"] {background:#1768C8 !important;border-color:#1768C8 !important;color:white !important;}
+[data-testid="stBaseButton-primary"] p {color:white !important;}
+</style>""", unsafe_allow_html=True)
+
+
+def config_value(name: str) -> str:
+    """Read deployment settings without requiring a secrets.toml file."""
+    env = os.environ.get(name, "").strip()
+    try:
+        secret = st.secrets.get(name, "")
+    except Exception:
+        secret = ""
+    return str(secret or env).strip()
 
 
 @st.cache_data(show_spinner=False)
-def read_local(path: str, last_mtime: int) -> pd.DataFrame:
-    return pd.read_csv(path, sep=";", encoding="utf-8-sig", keep_default_na=False, dtype=str)
+def read_csv(path: str, stamp: int) -> pd.DataFrame:
+    return pd.read_csv(path, sep=";", encoding="utf-8-sig", dtype=str, keep_default_na=False)
 
 
 def load_data() -> tuple[pd.DataFrame, bool, str]:
-    st.sidebar.markdown("**Importer un tableau déjà qualifié**")
-    uploaded = st.sidebar.file_uploader(
-        "CSV préparé par pipeline.py (facultatif)",
-        type=["csv"],
-        help="Le CSV remplace temporairement le tableau affiché. Le scraping, Groq et pipeline.py ne sont PAS lancés.",
-    )
-    st.sidebar.caption("Aucune analyse n'est déclenchée : import = visualisation uniquement. Pour recalculer les scores, exécuter `python pipeline.py` dans le terminal.")
-    safe_mode = os.environ.get("PUBLIC_MODE", "false").lower() == "true"
-    if uploaded is not None:
-        try:
-            imported = pd.read_csv(uploaded, sep=";", encoding="utf-8-sig", keep_default_na=False, dtype=str)
-            required = {"company_name", "website", "classification", "priority", "score_min", "score_max"}
-            missing = required.difference(imported.columns)
-            if missing:
-                st.sidebar.error("CSV non qualifié : champs absents — " + ", ".join(sorted(missing)) + ". Lance d'abord `python pipeline.py`.")
-            else:
-                st.sidebar.success(f"CSV importé : {len(imported)} fiches affichées. Aucun pipeline exécuté.")
-                return canonicalize(imported), True, "CSV importé (lecture seule)"
-        except Exception as exc:
-            st.sidebar.error(f"Impossible de lire le CSV : {exc}")
-    # Local development sees the newest processed results; a cloud deployment
-    # containing only the curated public CSV automatically uses that safe copy.
-    path = LOCAL if LOCAL.exists() and not safe_mode else PUBLIC
-    if not path.exists() and LOCAL.exists():
-        path = LOCAL
-    if not path.exists():
-        st.error("Aucune donnée trouvée. Lance d'abord `python pipeline.py` ou crée `data/public/leads_public.csv`.")
+    public_mode = config_value("PUBLIC_MODE").lower() != "false"
+    filename = PUBLIC if public_mode else (LOCAL if LOCAL.exists() else PUBLIC)
+    if not filename.exists():
+        st.error("Public dataset missing: data/public/leads_public.csv")
         st.stop()
-    # For automatic deployment, force safe mode whenever the curated public dataset is used.
-    safe_mode = safe_mode or path == PUBLIC
-    return canonicalize(read_local(str(path), path.stat().st_mtime_ns)), safe_mode, "Publication contrôlée" if path == PUBLIC else "Données locales"
+    data = read_csv(str(filename), filename.stat().st_mtime_ns).copy()
+    defaults = ["company_name", "website", "domain", "address", "email", "phone", "management_type", "units_managed",
+                "units_scope", "metering_signal", "berlin_signal", "score_min", "score_max", "priority", "classification",
+                "classification_reason", "data_quality", "completeness_pct", "scrape_status", "ai_validation", "review_status",
+                "validation_status", "source_url", "validation_sources", "validation_notes", "source_types", "contact_person"]
+    for key in defaults:
+        if key not in data:
+            data[key] = ""
+    for key in ["units_managed", "score_min", "score_max", "completeness_pct"]:
+        data[key] = pd.to_numeric(data[key], errors="coerce")
+    safe = public_mode or filename == PUBLIC
+    label = L["public_dataset"] if safe else L["private_dataset"]
+    return data, safe, label
 
 
-def canonicalize(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    cols = ["company_name", "website", "domain", "address", "email", "phone", "management_type", "units_managed",
-            "units_scope", "metering_signal", "berlin_signal", "score_min", "score_max", "priority", "classification",
-            "data_quality", "completeness_pct", "scrape_status", "ai_validation", "review_status", "validation_status",
-            "source_types", "source_url", "validation_sources", "validation_notes", "classification_reason", "contact_person"]
-    for col in cols:
-        if col not in df:
-            df[col] = ""
-    for col in ["score_min", "score_max", "units_managed", "completeness_pct"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    for col in ["classification", "priority", "review_status", "management_type"]:
-        df[col] = df[col].fillna("").astype(str)
-    return df
+def fmt_num(num: int) -> str:
+    return f"{num:,}".replace(",", " ")
 
 
-def metric_card(title: str, value: int | str, info: str):
-    # Title/info are authored constants; value is a computed numeric aggregate.
-    st.markdown(f'<div class="stat"><div class="label">{html.escape(title)}</div><div class="number">{html.escape(str(value))}</div><div class="note">{html.escape(info)}</div></div>', unsafe_allow_html=True)
+def status_count(column: str, status: str) -> int:
+    return int((df[column].astype(str) == status).sum())
 
 
-def hero(kicker: str, heading: str, desc: str):
-    st.markdown(f'<div class="hero"><div class="eyebrow">{html.escape(kicker)}</div><h1>{html.escape(heading)}</h1><p>{html.escape(desc)}</p></div>', unsafe_allow_html=True)
+def card(label: str, number: int | str, note: str) -> None:
+    st.markdown(
+        '<div class="stat"><div class="label">'+html.escape(label)+'</div><div class="number">'+
+        html.escape(fmt_num(number) if isinstance(number, int) else str(number))+'</div><div class="note">'+
+        html.escape(note)+'</div></div>', unsafe_allow_html=True)
 
 
-def plot_style(fig, height=310):
-    fig.update_layout(
-        template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Times New Roman, Times, serif", color="#243C56", size=14), height=height,
-        margin=dict(l=16, r=15, t=20, b=20), legend=dict(orientation="h", y=-.15, x=0),
-    )
-    fig.update_xaxes(showgrid=False, zeroline=False, color="#516A83")
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(74,107,145,.16)", zeroline=False, color="#516A83")
+def hero(kicker: str, title: str, subtitle: str) -> None:
+    st.markdown('<div class="hero"><div class="eyebrow">'+html.escape(kicker)+'</div><h1>'+
+                html.escape(title)+'</h1><p>'+html.escape(subtitle)+'</p></div>', unsafe_allow_html=True)
+
+
+def chart_style(fig, height: int = 315):
+    fig.update_layout(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      font=dict(family="Inter, Segoe UI, Arial", size=13, color=DARK),
+                      height=height, margin=dict(l=15, r=20, t=16, b=25),
+                      legend=dict(orientation="h", x=0, y=-0.17))
+    fig.update_xaxes(showgrid=False, zeroline=False, color="#54708D")
+    fig.update_yaxes(gridcolor="#E4EDF6", zeroline=False, color="#54708D")
     return fig
 
 
-def counts_bar(series: pd.Series, color_lookup: dict[str, str]):
-    table = series.rename_axis("Statut").reset_index(name="Nombre")
-    table = table.sort_values("Nombre", ascending=True)
-    fig = go.Figure(go.Bar(
-        x=table["Nombre"], y=table["Statut"], orientation="h",
-        marker_color=[color_lookup.get(str(c), BLUE) for c in table["Statut"]],
-        text=table["Nombre"], textposition="outside", cliponaxis=False,
-        hovertemplate="%{y}: %{x}<extra></extra>",
-    ))
+def bar_chart(values: pd.Series, mapping: dict[str, str]):
+    items = values.sort_values()
+    labels = [mapping.get(str(v), str(v)) for v in items.index]
+    fig = go.Figure(go.Bar(y=labels, x=items.values, orientation="h", text=items.values,
+                           marker_color=[COLORS.get(str(i), MUTED) for i in items.index],
+                           textposition="outside", cliponaxis=False))
     fig.update_layout(showlegend=False)
-    return plot_style(fig, 320)
+    return chart_style(fig, 330)
 
 
-def value_count(series: pd.Series, names: dict):
-    return series.fillna("").astype(str).map(lambda x: names.get(x, x or "Non renseigné")).value_counts()
-
-
-def overview():
-    hero("HEIDI SYSTEMS · B2B MARKET INTELLIGENCE", "Berlin Property Lead Intelligence",
-         "De la recherche automatisée au classement des gestionnaires immobiliers : couverture, fiabilité, adéquation commerciale et pistes de prospection — avec traçabilité des sources.")
-    total = len(df)
-    probable = int((df.classification == "LIKELY").sum())
-    reviewed = int(df.review_status.str.startswith("WEB_REVIEWED").sum())
-    scraped = int((df.scrape_status == "OK").sum())
-    cols = st.columns(4, gap="medium")
-    for c, content in zip(cols, [
-        ("Candidats consolidés", total, "Après fusion et déduplication"),
-        ("Prospects probables", probable, "Qualification automatique ou revue web"),
-        ("Sites effectivement visités", scraped, "Navigation Stagehand / Chromium"),
-        ("Fiches revues sur le Web", reviewed, "Revue documentée, réserves possibles"),
-    ]):
-        with c:
-            metric_card(*content)
-    st.markdown('<div class="export-panel"><strong>Exporter les résultats de la recherche</strong><p>Télécharge un CSV compatible Excel (UTF-8, séparateur ;). Les coordonnées individuelles sont exclues de ces exports.</p></div>', unsafe_allow_html=True)
-    export_all, export_likely = st.columns([1, 1], gap="medium")
-    with export_all:
-        st.download_button(
-            "📥 Télécharger tous les résultats (CSV)",
-            data=prepare_csv(df), file_name="berlin_tous_les_candidats.csv",
-            mime="text/csv", type="primary", use_container_width=True,
-            key="overview_export_all",
-        )
-    with export_likely:
-        likely = df[df.classification == "LIKELY"].copy()
-        st.download_button(
-            f"📥 Télécharger les {len(likely)} prospects probables (CSV)",
-            data=prepare_csv(likely), file_name="berlin_prospects_probables.csv",
-            mime="text/csv", use_container_width=True,
-            key="overview_export_likely",
-        )
-    st.markdown('<div class="section-eyebrow">PORTFOLIO SNAPSHOT</div>', unsafe_allow_html=True)
-    left, right = st.columns([1.03, .97], gap="large")
-    with left:
-        st.subheader("Répartition des candidats")
-        breakdown = value_count(df.classification, CLASS_FR)
-        fig = go.Figure(go.Pie(labels=breakdown.index.tolist(), values=breakdown.values.tolist(),
-                               hole=.67, marker=dict(colors=[{"Prospect probable":TEAL, "À vérifier":AMBER, "Hors cible":ROSE}.get(n,BLUE) for n in breakdown.index]),
-                               textinfo="label+percent", textposition="outside"))
-        fig = plot_style(fig, 315)
-        fig.update_layout(showlegend=False, annotations=[dict(text=f"<b>{total}</b><br>fiches", x=.5,y=.5,showarrow=False, font=dict(size=21))])
-        st.plotly_chart(fig, use_container_width=True)
-    with right:
-        st.subheader("Priorités commerciales")
-        st.plotly_chart(counts_bar(value_count(df.priority, PRIORITY_FR),
-                                  {"Haute": TEAL, "Moyenne": BLUE, "À enrichir": SLATE, "Vérifier l'entreprise": AMBER, "Exclu": ROSE}), use_container_width=True)
-
-    st.subheader("Couverture et maturité des données")
-    a,b,c,d = st.columns(4)
-    a.metric("Taux de scraping", f"{scraped / total:.1%}" if total else "0%")
-    b.metric("Preuves IA retrouvées", int((df.ai_validation == "EVIDENCE_CHECKED").sum()))
-    c.metric("Portefeuilles chiffrés", int(df.units_managed.notna().sum()))
-    d.metric("À revoir", int((df.classification == "REVIEW").sum()))
-    st.markdown("<div class='small-muted'>Une preuve Groq retrouvée n'est pas une vérification humaine. Une adresse berlinoise ne prouve pas à elle seule la gestion de biens à Berlin.</div>", unsafe_allow_html=True)
-
-    st.subheader("Prospects à examiner en priorité")
-    top = df[(df.classification == "LIKELY")].sort_values(["score_min", "score_max"], ascending=False).head(12)
-    show = top[["company_name", "management_type", "score_min", "score_max", "priority", "review_status", "website"]].copy()
-    show["management_type"] = show.management_type.map(lambda x: TYPE_FR.get(x, x))
-    st.dataframe(show, use_container_width=True, hide_index=True, height=370, column_config={
-        "company_name": "Entreprise", "management_type": "Type de gestion", "score_min": st.column_config.NumberColumn("Score minimum", format="%d / 100"),
-        "score_max": st.column_config.NumberColumn("Potentiel max.", format="%d / 100"),
-        "priority": "Priorité", "review_status": "Revue web", "website": st.column_config.LinkColumn("Site officiel")
-    })
-
-
-def methodology():
-    hero("TRANSPARENT LEAD QUALIFICATION", "KPIs & méthodologie",
-         "Comment chaque société est découverte, nettoyée, classée et notée — avec des règles explicites et des inconnues traitées comme de l'incertitude, pas comme des zéros.")
-    st.subheader("Les cinq étapes du pipeline")
-    steps = [
-        ("01", "Discovery", "SearXNG, annuaires VDIV et recherche Stagehand pour découvrir les sociétés candidates."),
-        ("02", "Scraping", "Chromium ouvre les pages autorisées : accueil, contact, services, à propos et mentions légales."),
-        ("03", "Enrichissement", "Groq extrait des catégories et des chiffres uniquement lorsqu'un extrait justificatif est retrouvé."),
-        ("04", "Consolidation", "Python corrige les titres génériques, fusionne les domaines, exclut annuaires et sites hors cible."),
-        ("05", "Qualification", "Un scoring de 0 à 100 et un niveau de confiance distinct servent à prioriser la vérification."),
-    ]
-    for no, name, desc in steps:
-        st.markdown(f'<div class="inline-panel"><span class="eyebrow">{no} / {html.escape(name)}</span><p>{html.escape(desc)}</p></div>', unsafe_allow_html=True)
-
-    st.subheader("Modèle de scoring · 100 points")
-    chart = go.Figure(go.Bar(x=[x["points"] for x in KPI], y=[x["title"] for x in KPI], orientation="h",
-                             marker_color=[TEAL, BLUE, "#80ACE8", AMBER, SLATE],
-                             text=[f'{x["points"]} pts' for x in KPI], textposition="inside"))
-    chart.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
-    st.plotly_chart(plot_style(chart, 340), use_container_width=True)
-    c1,c2 = st.columns(2, gap="medium")
-    for i, k in enumerate(KPI):
-        with (c1 if i%2==0 else c2):
-            st.markdown(f'<div class="kpi-card"><span class="score">{k["points"]} pts</span><h4>{html.escape(k["title"])}</h4><p>{html.escape(k["why"])}</p><p><strong>Règle : </strong>{html.escape(k["how"])}</p></div>', unsafe_allow_html=True)
-
-    st.subheader("Comment lire le score ?")
-    c1, c2 = st.columns(2, gap="medium")
-    with c1:
-        st.markdown("**Score minimum (`score_min`)** : points attribués selon les informations présentes dans les sources, parfois encore à vérifier.")
-        st.markdown("**Score maximum (`score_max`)** : score que la société pourrait obtenir si les données manquantes étaient favorables.")
-        st.info("Exemple : **65–90 / 100** indique 65 points soutenus par les données et 25 points encore incertains, pas une note définitive de 90.")
-    with c2:
-        st.markdown("**Priorité commerciale**, uniquement pour les sociétés classées `LIKELY` :")
-        st.markdown("- **HIGH** : score minimum ≥ 75\n- **MEDIUM** : score minimum de 45 à 74\n- **RESEARCH_MORE** : score minimum inférieur à 45")
-        st.warning("`REVIEW` signifie « Vérifier l'entreprise » quel que soit son score, et `EXCLUDED` est hors cible.")
-
-    st.subheader("Simulateur pédagogique du scoring")
-    with st.container(border=True):
-        aa,bb,cc = st.columns(3)
-        with aa:
-            sim_type = st.selectbox("Activité", ["residential", "mixed", "commercial", "unknown"], format_func=lambda v: TYPE_FR.get(v, v))
-            sim_units = st.selectbox("Portefeuille", ["unknown", "small", "medium", "large"], format_func=lambda v: {"unknown":"Non publié", "small":"50 unités", "medium":"350 unités", "large":"2 000 unités"}[v])
-        with bb:
-            sim_berlin = st.selectbox("Présence Berlin", ["WEB_REVIEW_BERLIN", "DIRECTORY_ADDRESS", "UNKNOWN"], format_func=lambda v: {"WEB_REVIEW_BERLIN":"Confirmée", "DIRECTORY_ADDRESS":"Adresse annuaire uniquement", "UNKNOWN":"Inconnue"}[v])
-            sim_meter = st.selectbox("Services", ["CONFIRMED_TEXT", "BILLING_TEXT", "UNKNOWN"], format_func=lambda v: {"CONFIRMED_TEXT":"Comptage confirmé", "BILLING_TEXT":"Décomptes/charges", "UNKNOWN":"Non documenté"}[v])
-        with cc:
-            sim_contact = st.selectbox("Contact", ["named", "generic", "phone", "none"], format_func=lambda v: {"named":"Email professionnel nominatif", "generic":"Email générique", "phone":"Téléphone seulement", "none":"Non disponible"}[v])
-        fake = {
-            "management_type": sim_type, "units_managed": {"unknown":None,"small":50,"medium":350,"large":2000}[sim_units],
-            "units_scope": "SIMULATION" if sim_units!="unknown" else "NOT_VERIFIED", "berlin_signal":sim_berlin,
-            "metering_signal":sim_meter, "email":"prenom@example.com" if sim_contact=="named" else "info@example.com" if sim_contact=="generic" else "",
-            "phone":"+49 30 000000" if sim_contact=="phone" else "",
-        }
-        lo,hi,factors = compute_score_from_fields(fake)
-        st.metric("Score estimé pour cet exemple", f"{lo}–{hi} / 100" if lo!=hi else f"{lo} / 100")
-        st.progress(lo/100)
-        st.caption("Exemple fictif : les catégories et les points sont modifiables par les sélecteurs.")
-
-    st.subheader("Limites et garanties")
-    st.markdown("""
-    - **Aucune donnée absente n'est inventée :** les champs inconnus restent vides.
-    - **Les unités sont accompagnées de leur périmètre :** Allemagne, Berlin + environs, ou non documenté. Nous ne confondons pas bâtiments et logements.
-    - **Une preuve IA n'est pas une confirmation humaine :** `EVIDENCE_CHECKED` valide uniquement la présence d'une citation dans le texte collecté.
-    - **La classification est distincte du score :** une société hors cible n'est jamais promue uniquement grâce à sa taille.
-    - **Les 10 premières revues web** portent un statut spécifique et peuvent inclure des réserves sur le registre juridique ou la portée géographique.
-    """)
-
-
-def prepare_csv(table: pd.DataFrame, include_contacts: bool = False) -> bytes:
-    sensitive = {"email", "phone", "contact_person"}
+def export_csv(table: pd.DataFrame, *, sep: str = ";", include_contacts: bool = False) -> bytes:
+    selected = table.copy()
     if not include_contacts:
-        table = table.drop(columns=[x for x in table.columns if x in sensitive], errors="ignore")
-    # Remove fields which can contain very long raw text / unrelated content.
-    table = table.drop(columns=[x for x in ["page_text"] if x in table.columns], errors="ignore")
-    return csv_safe(table).to_csv(index=False, sep=";").encode("utf-8-sig")
+        selected = selected.drop(columns=["email", "phone", "contact_person"], errors="ignore")
+    selected = selected.drop(columns=["page_text"], errors="ignore")
+    return csv_safe(selected).to_csv(index=False, sep=sep).encode("utf-8-sig")
 
 
-def explorer():
-    hero("FULL RESEARCH DATABASE", "Explorateur des entreprises",
-         "Toutes les fiches consolidées (y compris celles à vérifier et les exclusions), leurs statuts, scores et URLs sources. Filtre puis exporte la sélection en CSV.")
-    a,b,c,d = st.columns([1.5,1,1,1], gap="medium")
-    with a: search = st.text_input("Rechercher", placeholder="Nom, domaine, localisation...")
-    with b: class_filter = st.multiselect("Classification", sorted(df.classification.unique()), default=list(sorted(df.classification.unique())), format_func=lambda x:CLASS_FR.get(x,x))
-    with c: pri_filter = st.multiselect("Priorité", sorted(df.priority.unique()), default=list(sorted(df.priority.unique())), format_func=lambda x:PRIORITY_FR.get(x,x))
-    with d: reviewed_only = st.checkbox("Revue web uniquement", value=False)
-    col_e,col_f,col_g = st.columns([1.3,1.1,1.2])
-    with col_e: types = st.multiselect("Type de gestion", sorted(df.management_type.unique()), default=list(sorted(df.management_type.unique())), format_func=lambda x:TYPE_FR.get(x,x))
-    with col_f: minimum = st.slider("Score minimum", 0, 100, 0, step=5)
-    with col_g: order = st.selectbox("Trier par", ["Score minimum décroissant", "Score maximum décroissant", "Entreprise A–Z", "Qualité (revues d'abord)"])
-    view = df[df.classification.isin(class_filter) & df.priority.isin(pri_filter) & df.management_type.isin(types) & (df.score_min.fillna(0)>=minimum)].copy()
-    if reviewed_only:
-        view = view[view.review_status.str.startswith("WEB_REVIEWED")]
-    if search.strip():
-        term = search.casefold().strip()
-        mask = (view.company_name.astype(str) + " " + view.domain.astype(str) + " " + view.address.astype(str)).str.casefold().str.contains(term,regex=False)
-        view = view[mask]
-    if order == "Score minimum décroissant": view = view.sort_values(["score_min", "score_max"], ascending=False)
-    elif order == "Score maximum décroissant": view = view.sort_values("score_max",ascending=False)
-    elif order == "Entreprise A–Z": view = view.sort_values("company_name")
-    else: view = view.assign(_review=view.review_status.str.startswith("WEB_REVIEWED")).sort_values(["_review","score_min"],ascending=False).drop(columns="_review")
+def google_sheets_panel() -> None:
+    """Never suggests that a local download auto-opens in Sheets.
 
-    st.caption(f"**{len(view):,} fiches** sélectionnées sur {len(df):,} · Filtres appliqués immédiatement · L'ensemble des candidats est disponible en sélectionnant tous les statuts".replace(",", " "))
-    exp_selection, exp_complete = st.columns(2, gap="medium")
-    with exp_selection:
-        st.download_button(
-            f"📥 Télécharger la sélection filtrée — {len(view)} fiches (CSV)",
-            data=prepare_csv(view), file_name="berlin_selection_filtree.csv", mime="text/csv",
-            type="primary", use_container_width=True, key="explorer_export_filtered",
-        )
-    with exp_complete:
-        st.download_button(
-            f"📥 Télécharger la base complète — {len(df)} fiches (CSV)",
-            data=prepare_csv(df), file_name="berlin_resultats_complets.csv", mime="text/csv",
-            use_container_width=True, key="explorer_export_all",
-        )
-    table_cols = ["company_name", "website", "management_type", "units_managed", "units_scope", "score_min", "score_max", "priority", "classification", "review_status", "source_url"]
-    table = view[table_cols].copy()
-    table["management_type"] = table.management_type.map(lambda x: TYPE_FR.get(x,x))
-    table["classification"] = table.classification.map(lambda x: CLASS_FR.get(x,x))
-    table["priority"] = table.priority.map(lambda x: PRIORITY_FR.get(x,x))
-    table["source_url"] = table.source_url.str.split(" | ", regex=False).str[0]
-    st.dataframe(table, use_container_width=True, hide_index=True, height=570, column_config={
-        "company_name":st.column_config.TextColumn("Entreprise",width="large"),
-        "website":st.column_config.LinkColumn("Site officiel",width="medium"),
-        "management_type":st.column_config.TextColumn("Gestion",width="medium"),
-        "units_managed":st.column_config.NumberColumn("Unités gérées*",format="%.0f"),
-        "units_scope":st.column_config.TextColumn("Périmètre",width="medium"),
-        "score_min":st.column_config.NumberColumn("Min.",format="%d"),
-        "score_max":st.column_config.NumberColumn("Max.",format="%d"),
-        "priority":"Priorité", "classification":"Qualification", "review_status":"Vérification",
-        "source_url":st.column_config.LinkColumn("Source")
-    })
-    st.caption("* Les unités sont déclarées avec leur périmètre; des chiffres nationaux ne représentent pas nécessairement les logements berlinois.")
-
-    if not public_mode:
-        with st.expander("Export interne avec coordonnées professionnelles (usage privé)", expanded=False):
-            st.caption("Conserver ce fichier en interne : il peut contenir des emails professionnels directs. Ne pas le publier sur GitHub.")
-            st.download_button(
-                "📥 Export interne avec coordonnées (CSV)",
-                data=prepare_csv(view, include_contacts=True), file_name="berlin_export_interne.csv",
-                mime="text/csv", use_container_width=True, key="explorer_internal_export",
-            )
+    One click is enabled if GOOGLE_SHEET_URL already points to an existing
+    Google Sheet. Otherwise Sheets is opened and a comma CSV or IMPORTDATA
+    formula is offered for first-time setup.
+    """
+    st.markdown('<div class="section-label">'+html.escape(L["sheet_section"])+"</div>", unsafe_allow_html=True)
+    st.subheader(L["sheet_title"])
+    st.caption(L["sheet_desc"])
+    sheet_url = config_value("GOOGLE_SHEET_URL")
+    public_csv_url = config_value("PUBLIC_CSV_URL")
+    valid_sheet = sheet_url.startswith("https://docs.google.com/spreadsheets/")
+    if valid_sheet:
+        st.link_button(L["sheet_open"], sheet_url, use_container_width=True, type="primary")
     else:
-        st.caption("Export public : les emails et contacts individuels ne sont pas inclus.")
-
-    st.subheader("Fiche entreprise détaillée")
-    if view.empty:
-        st.info("Aucune entreprise pour ces filtres.")
-        return
-    options = list(view.index)
-    selected = st.selectbox("Sélectionner une entreprise", options, format_func=lambda idx: f"{view.loc[idx, 'company_name']} · {view.loc[idx, 'domain']}")
-    r = view.loc[selected]
-    w1,w2 = st.columns([1.2,.8], gap="large")
-    with w1:
-        st.markdown(f"### {r['company_name']}")
-        st.write(f"**Activité :** {TYPE_FR.get(r['management_type'], r['management_type'])}")
-        st.write(f"**Classement :** {CLASS_FR.get(r['classification'],r['classification'])} · {PRIORITY_FR.get(r['priority'],r['priority'])}")
-        st.write(f"**Justification :** {r.get('classification_reason','') or 'Non documentée'}")
-        st.write(f"**Périmètre d'unités :** {r.get('units_scope','') or 'Non publié'}")
-        st.write(f"**État de la revue web :** {r.get('review_status','') or 'Non vérifié'}")
-        if str(r.get("validation_notes", "")).strip():
-            st.warning(str(r["validation_notes"]))
-    with w2:
-        st.metric("Score minimum calculé", f"{int(r['score_min']) if pd.notna(r['score_min']) else 0} / 100")
-        st.metric("Score maximum possible", f"{int(r['score_max']) if pd.notna(r['score_max']) else 100} / 100")
-        official = str(r["website"])
-        if official.startswith(("https://", "http://")):
-            st.link_button("Ouvrir le site de l'entreprise", official, use_container_width=True)
-        sources = str(r.get("validation_sources", "") or r.get("source_url", "")).split(" | ")
-        urls = [v for v in sources if v.startswith(("https://", "http://"))]
-        if urls:
-            st.link_button("Consulter la source justificative", urls[0], use_container_width=True)
+        left, right = st.columns(2, gap="medium")
+        with left:
+            st.link_button(L["sheet_create"], "https://sheets.new", use_container_width=True)
+        with right:
+            # Export only curated public columns even in local/private mode.
+            google_data = pd.read_csv(PUBLIC, sep=";", encoding="utf-8-sig", dtype=str, keep_default_na=False)
+            st.download_button(L["sheet_ready"], export_csv(google_data, sep=","),
+                               "berlin_property_leads_google_sheets.csv", "text/csv", use_container_width=True,
+                               key="google_sheets_comma_csv")
+        st.info(L["sheet_instructions"])
+        if public_csv_url.startswith("https://") and public_csv_url.lower().endswith(".csv"):
+            st.caption(L["sheet_formula"])
+            st.code(f'=IMPORTDATA("{public_csv_url}")', language="text")
+        else:
+            st.caption(L["sheet_url_missing"])
+        with st.expander(L["sheet_config"], expanded=False):
+            st.code("GOOGLE_SHEET_URL = https://docs.google.com/spreadsheets/d/.../edit\n"
+                    "PUBLIC_CSV_URL = https://raw.githubusercontent.com/USERNAME/REPO/main/data/public/leads_public_google.csv",
+                    language="text")
+    st.caption(L["sheet_public_note"])
 
 
-def quality():
-    hero("DATA PROVENANCE & VALIDATION", "Qualité des données",
-         "Une vue transparente sur les données manquantes, les pages réellement visitées, les vérifications web et les résultats qui exigent encore un contrôle humain.")
+def overview() -> None:
+    hero(L["overview_kicker"], L["overview_title"], L["overview_desc"])
     total = len(df)
-    checked = int((df.ai_validation=="EVIDENCE_CHECKED").sum())
-    reviewed = int(df.review_status.str.startswith("WEB_REVIEWED").sum())
-    excluded = int((df.classification=="EXCLUDED").sum())
-    cc = st.columns(4)
-    for c, metric in zip(cc, [
-        ("Preuves Groq retrouvées",checked,"Références de texte, pas validation humaine"),
-        ("Fiches revues sur le Web",reviewed,"Certaines avec réserves explicites"),
-        ("Sites exclus",excluded,"Annuaires, articles ou sites hors cible"),
-        ("En attente de revue",total-reviewed,"Au moins une vérification nécessaire")
+    probable = status_count("classification", "LIKELY")
+    visited = status_count("scrape_status", "OK")
+    reviewed = int(df.review_status.astype(str).str.startswith("WEB_REVIEWED").sum())
+    for col, info in zip(st.columns(4, gap="medium"), [
+        (L["candidates"], total, L["candidates_note"]),
+        (L["likely"], probable, L["likely_note"]),
+        (L["visited"], visited, L["visited_note"]),
+        (L["reviewed"], reviewed, L["reviewed_note"]),
     ]):
-        with c: metric_card(*metric)
-    l,r = st.columns(2, gap="large")
-    with l:
-        st.subheader("Qualité et provenance")
-        counts = df.data_quality.fillna("").replace("", "NON_RÉPERTORIÉ").value_counts()
-        st.plotly_chart(counts_bar(counts, {"HIGH":TEAL,"MEDIUM":BLUE,"LOW":SLATE,"WEB_REVIEWED":TEAL,"WEB_REVIEWED_WITH_RESERVATIONS":AMBER}), use_container_width=True)
-    with r:
-        st.subheader("État des analyses IA")
-        counts = df.ai_validation.fillna("").replace("", "NON_ANALYSÉ").value_counts()
-        st.plotly_chart(counts_bar(counts, {"EVIDENCE_CHECKED":TEAL,"NEEDS_REVIEW":AMBER,"NOT_ANALYZED":SLATE,"FAILED":ROSE}), use_container_width=True)
+        with col:
+            card(*info)
+    st.markdown('<div class="info-card"><div class="eyebrow">'+html.escape(L["exports"])+
+                '</div><p>'+html.escape(L["exports_desc"])+"</p></div>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button(L["download_all"], export_csv(df), "berlin_property_leads_all.csv", "text/csv",
+                           use_container_width=True, type="primary", key="overview_all")
+    with c2:
+        likely = df[df.classification == "LIKELY"]
+        st.download_button(f'{L["download_likely"]} ({len(likely)})', export_csv(likely), "berlin_property_leads_likely.csv",
+                           "text/csv", use_container_width=True, key="overview_likely")
+    st.markdown('<div class="section-label">'+html.escape(L["snapshot"])+"</div>", unsafe_allow_html=True)
+    a, b = st.columns(2, gap="large")
+    with a:
+        st.subheader(L["classification_breakdown"])
+        ct = df.classification.value_counts()
+        fig = go.Figure(go.Pie(labels=[L["classes"].get(v, v) for v in ct.index], values=ct.values,
+                               hole=.64, textinfo="label+percent", textposition="outside",
+                               marker_colors=[COLORS.get(v, LIGHT) for v in ct.index]))
+        fig.update_layout(showlegend=False, annotations=[dict(text=f'<b>{total}</b><br>{L["records"]}',x=.5,y=.5,showarrow=False)])
+        st.plotly_chart(chart_style(fig, 320), use_container_width=True)
+    with b:
+        st.subheader(L["priority_chart"])
+        st.plotly_chart(bar_chart(df.priority.value_counts(), L["priorities"]), use_container_width=True)
+    st.subheader(L["coverage"])
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric(L["scraping_rate"], f"{visited/total:.1%}" if total else "0%")
+    m2.metric(L["ai_evidence"], status_count("ai_validation","EVIDENCE_CHECKED"))
+    m3.metric(L["units_count"], int(df.units_managed.notna().sum()))
+    m4.metric(L["review_count"], status_count("classification","REVIEW"))
+    st.caption(L["caution"])
+    st.subheader(L["top_companies"])
+    top = df[df.classification == "LIKELY"].sort_values(["score_min","score_max"], ascending=False).head(12)
+    st.dataframe(top[["company_name", "website", "management_type", "score_min", "score_max", "priority", "review_status"]],
+                 hide_index=True, use_container_width=True, height=360, column_config={
+                    "company_name":L["col_company"], "website":st.column_config.LinkColumn(L["col_website"]),
+                    "management_type":L["col_type"], "score_min":L["col_min"], "score_max":L["col_max"],
+                    "priority":L["col_priority"], "review_status":L["col_review"]})
 
-    st.subheader("Couverture des informations essentielles")
-    cols = [
-        ("Nom", df.company_name.astype(str).str.strip().ne("").sum()),
-        ("Site", df.website.astype(str).str.startswith("http").sum()),
-        ("Email professionnel", df.email.astype(str).str.contains("@", regex=False).sum()),
-        ("Périmètre chiffré", df.units_managed.notna().sum()),
-        ("Source", df.source_url.astype(str).str.strip().ne("").sum()),
+
+def methodology() -> None:
+    hero(L["kpis_kicker"], L["kpis_title"], L["kpis_desc"])
+    st.subheader(L["steps_title"])
+    for i,(name, description) in enumerate(L["steps"], 1):
+        st.markdown('<div class="info-card"><div class="eyebrow">'+f'{i:02d} / '+html.escape(name)+
+                    '</div><p>'+html.escape(description)+"</p></div>",unsafe_allow_html=True)
+    st.subheader(L["kpi_score_title"])
+    cards = L["kpi_cards"]
+    fig = go.Figure(go.Bar(x=[x[1] for x in cards], y=[x[0] for x in cards], orientation="h",
+                           marker_color=[BLUE, "#477FCC", "#78A4E2", LIGHT, MUTED],
+                           text=[f"{x[1]} / 100" for x in cards], textposition="inside"))
+    fig.update_layout(yaxis=dict(autorange="reversed"),showlegend=False)
+    st.plotly_chart(chart_style(fig, 310), use_container_width=True)
+    a,b = st.columns(2)
+    for idx,(name, points, why, rule) in enumerate(cards):
+        with (a if idx%2==0 else b):
+            st.markdown('<div class="kpi-card"><span class="score">'+f'{points} / 100'+
+                        '</span><h4>'+html.escape(name)+'</h4><p>'+html.escape(why)+
+                        '</p><p><b>'+html.escape(L["rule"])+':</b> '+html.escape(rule)+"</p></div>", unsafe_allow_html=True)
+    st.subheader(L["reading_scores"])
+    st.write(L["min_explain"])
+    st.write(L["max_explain"])
+    st.info(L["score_example"])
+    st.caption(L["priority_rules"])
+    st.subheader(L["sim_title"])
+    with st.container(border=True):
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            management = st.selectbox(L["sim_type"], ["residential","mixed","commercial","unknown"],
+                                      format_func=lambda k:L["types"].get(k,k))
+            units = st.selectbox(L["sim_units"], ["unknown","small","medium","large"],
+                                 format_func=lambda k:L["sim_units_options"].get(k,k))
+        with c2:
+            berlin = st.selectbox(L["sim_berlin"], ["WEB_REVIEW_BERLIN","DIRECTORY_ADDRESS","UNKNOWN"],
+                                  format_func=lambda k:L["sim_berlin_options"].get(k,k))
+            meter = st.selectbox(L["sim_meter"], ["CONFIRMED_TEXT","BILLING_TEXT","UNKNOWN"],
+                                 format_func=lambda k:L["sim_meter_options"].get(k,k))
+        with c3:
+            contact = st.selectbox(L["sim_contact"], ["named","generic","phone","none"],
+                                   format_func=lambda k:L["sim_contact_options"].get(k,k))
+        example = {"management_type":management,"units_managed":{"unknown":None,"small":50,"medium":350,"large":2000}[units],
+                   "units_scope":"SIMULATION" if units != "unknown" else "NOT_VERIFIED", "berlin_signal":berlin,
+                   "metering_signal":meter, "email":"name@example.com" if contact == "named" else "info@example.com" if contact=="generic" else "",
+                   "phone":"+49 30 000000" if contact=="phone" else ""}
+        minimum, maximum, _ = compute_score_from_fields(example)
+        st.metric(L["sim_score"], f"{minimum}–{maximum} / 100")
+        st.progress(minimum / 100)
+        st.caption(L["simulation_note"])
+    st.subheader(L["limits_title"])
+    for note in L["limits"]:
+        st.markdown("- "+note)
+
+
+def explorer() -> None:
+    hero(L["explorer_kicker"], L["explorer_title"], L["explorer_desc"])
+    a,b,c,d = st.columns([1.6,1,1,1],gap="medium")
+    with a: search = st.text_input(L["search"], placeholder=L["search_ph"])
+    with b:
+        available_classes = sorted(df.classification.unique())
+        allowed_classes = st.multiselect(L["classification"], available_classes, default=available_classes,
+                                         format_func=lambda v:L["classes"].get(v,v))
+    with c:
+        available_priorities = sorted(df.priority.unique())
+        allowed_priorities = st.multiselect(L["priority"], available_priorities, default=available_priorities,
+                                            format_func=lambda v:L["priorities"].get(v,v))
+    with d: only_reviewed = st.checkbox(L["reviewed_only"])
+    e,f,g = st.columns([1.4,1,1.2])
+    with e:
+        available_types = sorted(df.management_type.unique())
+        allowed_types = st.multiselect(L["management"],available_types,default=available_types,
+                                      format_func=lambda v:L["types"].get(v,v))
+    with f: minimum = st.slider(L["minimum"],0,100,0,5)
+    with g: sort_index = st.selectbox(L["sort"], list(range(4)),format_func=lambda v:L["sort_options"][v])
+    view = df[df.classification.isin(allowed_classes)&df.priority.isin(allowed_priorities)&
+              df.management_type.isin(allowed_types)&(df.score_min.fillna(0)>=minimum)].copy()
+    if only_reviewed:
+        view = view[view.review_status.astype(str).str.startswith("WEB_REVIEWED")]
+    if search.strip():
+        combined = view["company_name"].astype(str)+" "+view["domain"].astype(str)+" "+view["address"].astype(str)
+        view = view[combined.str.casefold().str.contains(search.casefold().strip(),regex=False)]
+    if sort_index == 0: view = view.sort_values(["score_min","score_max"],ascending=False)
+    elif sort_index == 1: view = view.sort_values("score_max",ascending=False)
+    elif sort_index == 2: view = view.sort_values("company_name")
+    else:
+        view = view.assign(_has_review=view.review_status.str.startswith("WEB_REVIEWED")).sort_values(
+            ["_has_review","score_min"],ascending=False).drop(columns="_has_review")
+    st.caption(L["showing"].format(n=fmt_num(len(view)),total=fmt_num(len(df))))
+    dl1,dl2 = st.columns(2)
+    with dl1:
+        st.download_button(L["download_selection"]+f" ({len(view)})", export_csv(view),
+                           "berlin_filtered_results.csv", "text/csv", type="primary", use_container_width=True,key="export_filtered")
+    with dl2:
+        st.download_button(L["download_complete"]+f" ({len(df)})", export_csv(df),
+                           "berlin_complete_results.csv", "text/csv", use_container_width=True,key="export_complete")
+    google_sheets_panel()
+    st.subheader(L["all_data"])
+    table_columns = ["company_name","website","management_type","units_managed","units_scope","score_min","score_max","priority","classification","review_status","source_url"]
+    table = view[table_columns].copy()
+    table["management_type"] = table.management_type.map(lambda x:L["types"].get(x,x))
+    table["classification"] = table.classification.map(lambda x:L["classes"].get(x,x))
+    table["priority"] = table.priority.map(lambda x:L["priorities"].get(x,x))
+    table["source_url"] = table.source_url.str.split(" | ",regex=False).str[0]
+    st.dataframe(table,use_container_width=True,hide_index=True,height=535,column_config={
+        "company_name":st.column_config.TextColumn(L["col_company"],width="large"),
+        "website":st.column_config.LinkColumn(L["col_website"]),
+        "management_type":L["col_type"],
+        "units_managed":st.column_config.NumberColumn(L["col_units"],format="%.0f"),
+        "units_scope":L["col_scope"],
+        "score_min":L["col_min"],"score_max":L["col_max"],
+        "priority":L["col_priority"],"classification":L["col_class"],"review_status":L["col_review"],
+        "source_url":st.column_config.LinkColumn(L["col_source"]),
+    })
+    st.caption(L["units_note"])
+    if not public_mode:
+        with st.expander(L["private_export"]):
+            st.caption(L["private_note"])
+            st.download_button(L["private_button"],export_csv(view,include_contacts=True),
+                               "berlin_internal_contacts.csv","text/csv",use_container_width=True,key="private_csv")
+    else:
+        st.caption(L["public_note"])
+    st.subheader(L["details"])
+    if view.empty:
+        st.info(L["no_companies"])
+        return
+    idx = st.selectbox(L["pick_company"], list(view.index),
+                       format_func=lambda i:f'{view.loc[i,"company_name"]} · {view.loc[i,"domain"]}')
+    row = view.loc[idx]
+    a,b = st.columns([1.2,.8],gap="large")
+    with a:
+        st.subheader(str(row["company_name"]))
+        st.write(f'**{L["activity"]}:** {L["types"].get(str(row["management_type"]),row["management_type"])}')
+        st.write(f'**{L["classification"]}:** {L["classes"].get(row["classification"],row["classification"])}')
+        st.write(f'**{L["reason"]}:** {row["classification_reason"] or L["not_documented"]}')
+        st.write(f'**{L["scope"]}:** {row["units_scope"] or L["not_documented"]}')
+        st.write(f'**{L["review_state"]}:** {row["review_status"] or L["unverified"]}')
+        if row["validation_notes"]:
+            st.warning(str(row["validation_notes"]))
+    with b:
+        low = int(row["score_min"]) if pd.notna(row["score_min"]) else 0
+        high = int(row["score_max"]) if pd.notna(row["score_max"]) else 100
+        st.metric(L["min_metric"],f"{low} / 100")
+        st.metric(L["max_metric"],f"{high} / 100")
+        web = str(row["website"])
+        if web.startswith(("https://","http://")):
+            st.link_button(L["open_website"],web,use_container_width=True)
+        sources = str(row["validation_sources"] or row["source_url"]).split(" | ")
+        links = [s for s in sources if s.startswith(("https://","http://"))]
+        if links:
+            st.link_button(L["open_source"],links[0],use_container_width=True)
+
+
+def quality() -> None:
+    hero(L["quality_kicker"],L["quality_title"],L["quality_desc"])
+    evidence = status_count("ai_validation","EVIDENCE_CHECKED")
+    reviewed = int(df.review_status.str.startswith("WEB_REVIEWED").sum())
+    excluded = status_count("classification","EXCLUDED")
+    metrics = [
+        (L["checks"],evidence,L["checks_note"]),
+        (L["reviewed"],reviewed,L["reviewed_note"]),
+        (L["exclusions"],excluded,L["exclusions_note"]),
+        (L["waiting"],len(df)-reviewed,L["waiting_note"]),
     ]
-    chart = go.Figure(go.Bar(
-        x=[n for n,_ in cols], y=[int(v)/total*100 if total else 0 for _,v in cols],
-        marker_color=[TEAL, BLUE, AMBER, "#7599CD", SLATE],
-        text=[f"{int(v)}/{total}" for _,v in cols], textposition="outside"
-    ))
-    chart.update_yaxes(range=[0,112], ticksuffix="%")
-    st.plotly_chart(plot_style(chart, 300), use_container_width=True)
+    for column,data in zip(st.columns(4),metrics):
+        with column: card(*data)
+    a,b = st.columns(2,gap="large")
+    with a:
+        st.subheader(L["quality_provenance"])
+        st.plotly_chart(bar_chart(df.data_quality.replace("", "UNKNOWN").value_counts(), {}),use_container_width=True)
+    with b:
+        st.subheader(L["ai_status"])
+        st.plotly_chart(bar_chart(df.ai_validation.replace("", "NOT_ANALYZED").value_counts(),{}),use_container_width=True)
+    st.subheader(L["field_coverage"])
+    fields = [
+        int(df.company_name.str.strip().ne("").sum()),
+        int(df.website.str.startswith("http").sum()),
+        int(df.email.str.contains("@",regex=False).sum()),
+        int(df.units_managed.notna().sum()),
+        int(df.source_url.str.strip().ne("").sum()),
+    ]
+    fig = go.Figure(go.Bar(x=L["fields"],y=[100*n/len(df) if len(df) else 0 for n in fields],
+                           marker_color=[BLUE,"#4E86CE",LIGHT,MUTED,GREY],
+                           text=[f'{n}/{len(df)}' for n in fields],textposition="outside"))
+    fig.update_yaxes(range=[0,115],ticksuffix="%")
+    st.plotly_chart(chart_style(fig,305),use_container_width=True)
+    st.subheader(L["anomalies"])
+    flagged = df[(df.classification=="REVIEW") | (df.review_status=="WEB_REVIEWED_WITH_RESERVATIONS")].head(120)
+    st.dataframe(flagged[["company_name","domain","classification_reason","review_status","validation_notes","website"]],
+                 use_container_width=True,hide_index=True,height=390,
+                 column_config={"company_name":L["col_company"],"website":st.column_config.LinkColumn(L["col_website"])})
+    st.caption(L["review_caution"])
 
-    st.subheader("Anomalies nécessitant une action")
-    flags = df[(df.classification=="REVIEW") | (df.review_status=="WEB_REVIEWED_WITH_RESERVATIONS")].copy()
-    st.dataframe(flags[["company_name","domain","classification_reason","review_status","validation_notes","website"]].head(120),
-                 use_container_width=True, hide_index=True, height=420,
-                 column_config={"website":st.column_config.LinkColumn("Site")})
-    st.caption("Les lignes à vérifier restent dans la base pour éviter les exclusions erronées. Les revues web documentent les sources mais ne remplacent pas un contrôle légal approfondi.")
 
-
+language_label = st.sidebar.selectbox("Language / Sprache", ["English", "Deutsch"], index=0)
+LANG = "de" if language_label == "Deutsch" else "en"
+L = I18N[LANG]
 df, public_mode, source_label = load_data()
-with st.sidebar:
-    st.markdown("**Export rapide**")
-    st.download_button(
-        "📥 Télécharger les résultats CSV",
-        data=prepare_csv(df), file_name="berlin_leads_resultats.csv",
-        mime="text/csv", type="primary", use_container_width=True,
-        key="sidebar_export_all",
-    )
-    st.caption("Téléchargement uniquement : aucune modification des données.")
-    st.divider()
-    st.markdown('<div class="section-eyebrow">RESEARCH WORKSPACE</div>', unsafe_allow_html=True)
-    st.caption("Navigation · Données consolidées · KPIs")
-    st.divider()
-    st.caption(f"Source : {source_label}")
-    st.caption(f"Base : {len(df):,} candidats".replace(",", " "))
-    st.markdown("---")
-    st.caption("**Source des résultats** : Stagehand / SearXNG + annuaires + Groq + revues web. Les scores sont indicatifs.")
 
-navigation = st.navigation([
-    st.Page(overview, title="Vue d'ensemble", icon="📊", default=True),
-    st.Page(methodology, title="Méthodologie & KPIs", icon="🎯"),
-    st.Page(explorer, title="Entreprises & Export", icon="🏢"),
-    st.Page(quality, title="Qualité & Validation", icon="🔎"),
-], position="sidebar")
-navigation.run()
+with st.sidebar:
+    st.markdown("**"+L["project"]+"**")
+    st.caption(L["case"])
+    st.divider()
+    st.markdown("**"+L["sidebar_export"]+"**")
+    st.caption(L["sidebar_caption"])
+    st.download_button(L["sidebar_csv"],export_csv(df),"berlin_property_leads.csv","text/csv",
+                       use_container_width=True,type="primary",key="sidebar_csv")
+    st.divider()
+    st.caption(f'{L["source"]}: {source_label}')
+    st.caption(f'{L["total_base"]}: {fmt_num(len(df))}')
+    st.caption(L["method_note"])
+
+pages = [
+    st.Page(overview,title=L["nav_overview"],default=True),
+    st.Page(methodology,title=L["nav_kpis"]),
+    st.Page(explorer,title=L["nav_explorer"]),
+    st.Page(quality,title=L["nav_quality"]),
+]
+st.navigation(pages,position="sidebar").run()
