@@ -1,4 +1,4 @@
-"""Berlin Property Lead Intelligence — professional Streamlit dashboard.
+"""Berlin Property Lead Intelligence — light Times New Roman Streamlit dashboard.
 
 Four pages: executive overview, KPI methodology, full explorer, data quality.
 Public deployments read only curated data/public/leads_public.csv.
@@ -22,12 +22,12 @@ LOCAL = ROOT / "data" / "processed" / "leads_all.csv"
 PUBLIC = ROOT / "data" / "public" / "leads_public.csv"
 REPORT = ROOT / "data" / "processed" / "quality_report.json"
 
-NAVY = "#0B1526"
-TEAL = "#30C9C1"
-BLUE = "#598CFF"
-AMBER = "#EFB65D"
-ROSE = "#EC7C84"
-SLATE = "#9AAFC1"
+NAVY = "#142E55"
+TEAL = "#1754AB"
+BLUE = "#4B8CE4"
+AMBER = "#86ACDD"
+ROSE = "#B3BBC9"
+SLATE = "#94A7C1"
 PALETTE = {
     "LIKELY": TEAL, "REVIEW": AMBER, "EXCLUDED": ROSE,
     "HIGH": TEAL, "MEDIUM": BLUE, "RESEARCH_MORE": SLATE,
@@ -54,30 +54,158 @@ KPI = [
 st.set_page_config(page_title="Berlin Property Lead Intelligence | Heidi Systems", page_icon="🏙️", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
-:root {--ink:#EDF5FD;--sub:#A4B5CA;--accent:#30C9C1;}
-.stApp {background: radial-gradient(ellipse 1100px 500px at 85% 2%, rgba(55,111,181,.18), transparent 68%), #0B1526; color: #EAF3FC;}
-[data-testid="stSidebar"] {background: #0D1B2E; border-right:1px solid #21324A;}
-.block-container {padding-top: 1.8rem; padding-bottom: 4rem; max-width: 1530px;}
-.hero {padding: 28px 30px 25px; border:1px solid #273C55; border-radius: 20px;
- background:linear-gradient(112deg, rgba(25,48,74,.96), rgba(16,38,59,.9) 55%,rgba(14,73,85,.7)); margin: 0 0 24px;}
-.eyebrow {font-size:11px; letter-spacing:2.1px; color:#55DFD2; text-transform:uppercase; font-weight:750;}
-.hero h1 {font-size:clamp(27px,3.2vw,42px); font-weight:800; color:#F2F7FE; line-height:1.12; margin:10px 0 13px;}
-.hero p {color:#B8C9DC; font-size:14px; line-height:1.65; max-width:800px; margin-bottom:0;}
-.stat {background:#101F34; border:1px solid #263C56; padding:17px 19px 15px; border-radius:15px; min-height:125px;}
-.stat .label {font-size:12px; color:#9FB5CB; letter-spacing:.4px;}
-.stat .number {font-size:33px; font-weight:750; color:#F3FAFF; line-height:1.5;}
-.stat .note {font-size:11px; color:#7E97AC; line-height:1.4;}
-.section-eyebrow {font-size:11px; color:#48D1C8; font-weight:750; letter-spacing:1.7px; margin:11px 0 3px;}
-.inline-panel {background:#0F2035; border:1px solid #263B55; padding:18px 20px; border-radius:14px; margin:11px 0;}
-.inline-panel p {color:#AFC1D5; font-size:13px; line-height:1.6; margin:7px 0;}
-.kpi-card {background:#11243A; border:1px solid #294660; padding:18px; border-radius:14px; margin-bottom:12px; min-height:146px;}
-.kpi-card h4 {margin:0 0 8px; font-size:16px; color:#F2F8FF;}
-.kpi-card p {font-size:12px; line-height:1.55; color:#A8BACD; margin:5px 0;}
-.kpi-card .score {font-weight:750; font-size:19px; color:#55DCCF; float:right;}
-.small-muted {font-size:12px; color:#9EB2C8; margin:7px 0 20px;}
-[data-testid="stMetric"] {background: #101F34; border: 1px solid #263C56; border-radius: 14px; padding: 16px;}
-[data-testid="stDataFrame"] {border:1px solid #2B4059; border-radius:12px;}
-h1,h2,h3 {color:#F4F9FF;}
+/* Berlin Property Lead Intelligence — light editorial theme */
+:root {
+  color-scheme: light;
+  --bpli-ink: #142E55;
+  --bpli-secondary: #435C7A;
+  --bpli-border: #DCE5EF;
+  --bpli-paper: #FFFFFF;
+  --bpli-page: #F5F8FF;
+  --bpli-accent: #1768C8;
+}
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"] {
+  font-family: "Times New Roman", Times, serif !important;
+  color: var(--bpli-ink) !important;
+}
+.stApp, [data-testid="stAppViewContainer"] {
+  background: radial-gradient(ellipse 860px 410px at 92% 4%, #EAF3FA 0%, transparent 70%), var(--bpli-page) !important;
+  color: var(--bpli-ink) !important;
+}
+/* Native Streamlit text and widgets */
+.stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5,
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
+[data-testid="stSidebar"] button, [data-testid="stSidebar"] input,
+[data-testid="stMetricLabel"], [data-testid="stMetricValue"],
+[data-testid="stMarkdownContainer"] {
+  font-family: "Times New Roman", Times, serif !important;
+}
+.stApp h1, .stApp h2, .stApp h3, .stApp h4,
+[data-testid="stMarkdownContainer"] strong {color: #142E55;}
+.stApp p, .stApp label {color: #2E4359;}
+.stApp small, [data-testid="stCaptionContainer"] {color: #516B88 !important;}
+.block-container {padding-top: 1.6rem; padding-bottom: 4rem; max-width: 1500px;}
+/* Sidebar: readable contrast in all navigation and input states */
+[data-testid="stSidebar"] {
+  background: #FFFFFF !important;
+  border-right: 1px solid #D5E1ED !important;
+  box-shadow: 3px 0 24px rgba(30,64,103,.035);
+}
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] {padding-top: 1.05rem;}
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+  color: #253B52 !important;
+  opacity: 1 !important;
+}
+[data-testid="stSidebarNav"]::before {
+  content: "BERLIN LEAD INTELLIGENCE";
+  display: block;
+  margin: 0 14px 7px;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 18px;
+  line-height: 1.22;
+  letter-spacing: .35px;
+  font-weight: 700;
+  color: #153C70;
+}
+[data-testid="stSidebarNav"]::after {
+  content: "HEIDI SYSTEMS  ·  CASE STUDY";
+  display: block;
+  margin: 12px 14px 17px;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 11px;
+  letter-spacing: 1.15px;
+  font-weight: 700;
+  color: #647991;
+}
+[data-testid="stSidebarNav"] a, [data-testid="stSidebarNav"] button {
+  color: #233B55 !important;
+  font-family: "Times New Roman", Times, serif !important;
+  font-size: 16px !important;
+  font-weight: 600;
+  border-radius: 10px !important;
+  opacity: 1 !important;
+}
+[data-testid="stSidebarNav"] a:hover, [data-testid="stSidebarNav"] button:hover {
+  background: #E9F3FF !important;
+  color: #1353A3 !important;
+}
+[data-testid="stSidebarNav"] a[aria-current="page"],
+[data-testid="stSidebarNav"] a[aria-selected="true"],
+[data-testid="stSidebarNav"] a[data-active="true"] {
+  background: #E4F0FF !important;
+  color: #1353A3 !important;
+  font-weight: 700 !important;
+  border-left: 3px solid #1768C8;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+  background: #F7FAFD !important;
+  border: 1px dashed #ADC4D7 !important;
+  border-radius: 12px;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] * {color:#304760 !important;}
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="input"] > div {
+  background: #FFFFFF !important;
+  color: #20384F !important;
+  border: 1px solid #C8D8E7 !important;
+}
+[data-testid="stSidebar"] hr {border-color: #DCE6EF !important;}
+/* Editorial header and readable statistics */
+.hero {
+  padding: 29px 33px 28px;
+  border: 1px solid #C8DBEA;
+  border-radius: 18px;
+  background: linear-gradient(120deg, #FFFFFF 0%, #F1F7FF 52%, #E0EDFF 100%);
+  box-shadow: 0 7px 26px rgba(37,76,117,.06);
+  margin: 0 0 24px;
+}
+.eyebrow {font-size:12px; letter-spacing:1.7px; color:#1768C8; text-transform:uppercase; font-weight:700;}
+.hero h1 {font-size:clamp(30px,3.3vw,43px); font-weight:700; color:#153C70; line-height:1.15; margin:12px 0 12px;}
+.hero p {color:#49627A; font-size:16px; line-height:1.55; max-width:880px; margin-bottom:0;}
+.stat {
+  background:#FFFFFF;
+  border:1px solid #D8E3ED;
+  padding:18px 20px 17px;
+  border-radius:14px;
+  min-height:130px;
+  box-shadow: 0 4px 14px rgba(28,64,101,.04);
+}
+.stat .label {font-size:14px; color:#496078; letter-spacing:.1px; font-weight:600;}
+.stat .number {font-size:35px; font-weight:700; color:#183C70; line-height:1.45;}
+.stat .note {font-size:12px; color:#657B92; line-height:1.45;}
+.section-eyebrow {font-size:12px; color:#135CB5; font-weight:700; letter-spacing:1.5px; margin:16px 0 8px;}
+.inline-panel {background:#FFFFFF; border:1px solid #D8E3ED; padding:17px 21px; border-radius:13px; margin:11px 0;}
+.inline-panel p {color:#405971; font-size:15px; line-height:1.52; margin:8px 0;}
+.kpi-card {background:#FFFFFF; border:1px solid #D8E3ED; padding:18px; border-radius:13px; margin-bottom:12px; min-height:148px;}
+.kpi-card h4 {margin:0 0 8px; font-size:19px; color:#143862;}
+.kpi-card p {font-size:14px; line-height:1.55; color:#4B627A; margin:5px 0;}
+.kpi-card .score {font-weight:700; font-size:21px; color:#1768C8; float:right;}
+.small-muted {font-size:13px; color:#546B81; margin:8px 0 21px;}
+[data-testid="stMetric"] {background:#FFFFFF; border:1px solid #D8E3ED; border-radius:13px; padding:16px;}
+[data-testid="stMetricValue"] {color:#183C70 !important;}
+[data-testid="stMetricLabel"] {color:#435C7A !important;}
+[data-testid="stDataFrame"] {background:#FFFFFF; border:1px solid #D9E4EF; border-radius:12px; overflow:hidden;}
+[data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] {border-color:#D9E4EF;}
+/* Buttons, menus and form controls */
+[data-testid="stBaseButton-primary"] {
+  background-color:#1768C8 !important; border-color:#1768C8 !important; color:#FFFFFF !important;
+}
+[data-testid="stBaseButton-primary"]:hover {background-color:#0F4FA6 !important;}
+[data-testid="stBaseButton-primary"] p,
+[data-testid="stBaseButton-primary"] span {color:#FFFFFF !important;}
+[data-testid="stDownloadButton"] button {border-radius:10px; font-weight:700; min-height:44px;}
+[data-testid="stDownloadButton"] button[kind="primary"] {background:#1768C8 !important; color:#FFFFFF !important; border-color:#1768C8 !important;}
+[data-testid="stDownloadButton"] button[kind="primary"] p {color:#FFFFFF !important;}
+[data-testid="stFileUploader"] {margin-bottom:.45rem;}
+.export-panel {background:#FFFFFF; border:1px solid #C9DBF4; border-radius:14px; padding:12px 17px; margin:11px 0 13px;}
+.export-panel strong {color:#154785; font-size:17px;}
+.export-panel p {color:#4E6581; margin:4px 0 0; font-size:14px;}
+[data-baseweb="select"] div, [data-baseweb="input"] input {color:#23394F;}
+/* Retain Streamlit icon glyph fonts; do not override Material Symbols. */
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,11 +216,26 @@ def read_local(path: str, last_mtime: int) -> pd.DataFrame:
 
 
 def load_data() -> tuple[pd.DataFrame, bool, str]:
-    uploaded = st.sidebar.file_uploader("Charger un CSV (facultatif)", type=["csv"])
+    st.sidebar.markdown("**Importer un tableau déjà qualifié**")
+    uploaded = st.sidebar.file_uploader(
+        "CSV préparé par pipeline.py (facultatif)",
+        type=["csv"],
+        help="Le CSV remplace temporairement le tableau affiché. Le scraping, Groq et pipeline.py ne sont PAS lancés.",
+    )
+    st.sidebar.caption("Aucune analyse n'est déclenchée : import = visualisation uniquement. Pour recalculer les scores, exécuter `python pipeline.py` dans le terminal.")
     safe_mode = os.environ.get("PUBLIC_MODE", "false").lower() == "true"
     if uploaded is not None:
-        df = pd.read_csv(uploaded, sep=";", encoding="utf-8-sig", keep_default_na=False, dtype=str)
-        return canonicalize(df), True, "Fichier importé"
+        try:
+            imported = pd.read_csv(uploaded, sep=";", encoding="utf-8-sig", keep_default_na=False, dtype=str)
+            required = {"company_name", "website", "classification", "priority", "score_min", "score_max"}
+            missing = required.difference(imported.columns)
+            if missing:
+                st.sidebar.error("CSV non qualifié : champs absents — " + ", ".join(sorted(missing)) + ". Lance d'abord `python pipeline.py`.")
+            else:
+                st.sidebar.success(f"CSV importé : {len(imported)} fiches affichées. Aucun pipeline exécuté.")
+                return canonicalize(imported), True, "CSV importé (lecture seule)"
+        except Exception as exc:
+            st.sidebar.error(f"Impossible de lire le CSV : {exc}")
     # Local development sees the newest processed results; a cloud deployment
     # containing only the curated public CSV automatically uses that safe copy.
     path = LOCAL if LOCAL.exists() and not safe_mode else PUBLIC
@@ -133,12 +276,12 @@ def hero(kicker: str, heading: str, desc: str):
 
 def plot_style(fig, height=310):
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Arial, sans-serif", color="#DCE8F6", size=12), height=height,
+        template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Times New Roman, Times, serif", color="#243C56", size=14), height=height,
         margin=dict(l=16, r=15, t=20, b=20), legend=dict(orientation="h", y=-.15, x=0),
     )
-    fig.update_xaxes(showgrid=False, zeroline=False, color="#A6B8CE")
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(160,185,220,.11)", zeroline=False, color="#A6B8CE")
+    fig.update_xaxes(showgrid=False, zeroline=False, color="#516A83")
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(74,107,145,.16)", zeroline=False, color="#516A83")
     return fig
 
 
@@ -175,6 +318,23 @@ def overview():
     ]):
         with c:
             metric_card(*content)
+    st.markdown('<div class="export-panel"><strong>Exporter les résultats de la recherche</strong><p>Télécharge un CSV compatible Excel (UTF-8, séparateur ;). Les coordonnées individuelles sont exclues de ces exports.</p></div>', unsafe_allow_html=True)
+    export_all, export_likely = st.columns([1, 1], gap="medium")
+    with export_all:
+        st.download_button(
+            "📥 Télécharger tous les résultats (CSV)",
+            data=prepare_csv(df), file_name="berlin_tous_les_candidats.csv",
+            mime="text/csv", type="primary", use_container_width=True,
+            key="overview_export_all",
+        )
+    with export_likely:
+        likely = df[df.classification == "LIKELY"].copy()
+        st.download_button(
+            f"📥 Télécharger les {len(likely)} prospects probables (CSV)",
+            data=prepare_csv(likely), file_name="berlin_prospects_probables.csv",
+            mime="text/csv", use_container_width=True,
+            key="overview_export_likely",
+        )
     st.markdown('<div class="section-eyebrow">PORTFOLIO SNAPSHOT</div>', unsafe_allow_html=True)
     left, right = st.columns([1.03, .97], gap="large")
     with left:
@@ -226,7 +386,7 @@ def methodology():
 
     st.subheader("Modèle de scoring · 100 points")
     chart = go.Figure(go.Bar(x=[x["points"] for x in KPI], y=[x["title"] for x in KPI], orientation="h",
-                             marker_color=[TEAL, BLUE, "#87A2FF", AMBER, SLATE],
+                             marker_color=[TEAL, BLUE, "#80ACE8", AMBER, SLATE],
                              text=[f'{x["points"]} pts' for x in KPI], textposition="inside"))
     chart.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
     st.plotly_chart(plot_style(chart, 340), use_container_width=True)
@@ -312,6 +472,19 @@ def explorer():
     else: view = view.assign(_review=view.review_status.str.startswith("WEB_REVIEWED")).sort_values(["_review","score_min"],ascending=False).drop(columns="_review")
 
     st.caption(f"**{len(view):,} fiches** sélectionnées sur {len(df):,} · Filtres appliqués immédiatement · L'ensemble des candidats est disponible en sélectionnant tous les statuts".replace(",", " "))
+    exp_selection, exp_complete = st.columns(2, gap="medium")
+    with exp_selection:
+        st.download_button(
+            f"📥 Télécharger la sélection filtrée — {len(view)} fiches (CSV)",
+            data=prepare_csv(view), file_name="berlin_selection_filtree.csv", mime="text/csv",
+            type="primary", use_container_width=True, key="explorer_export_filtered",
+        )
+    with exp_complete:
+        st.download_button(
+            f"📥 Télécharger la base complète — {len(df)} fiches (CSV)",
+            data=prepare_csv(df), file_name="berlin_resultats_complets.csv", mime="text/csv",
+            use_container_width=True, key="explorer_export_all",
+        )
     table_cols = ["company_name", "website", "management_type", "units_managed", "units_scope", "score_min", "score_max", "priority", "classification", "review_status", "source_url"]
     table = view[table_cols].copy()
     table["management_type"] = table.management_type.map(lambda x: TYPE_FR.get(x,x))
@@ -331,18 +504,16 @@ def explorer():
     })
     st.caption("* Les unités sont déclarées avec leur périmètre; des chiffres nationaux ne représentent pas nécessairement les logements berlinois.")
 
-    c1,c2,c3 = st.columns([1.2,1.2,1.5])
-    with c1:
-        st.download_button("↓ Télécharger la sélection (CSV)", data=prepare_csv(view), file_name="berlin_leads_selection.csv", mime="text/csv", use_container_width=True, type="primary")
-    with c2:
-        st.download_button("↓ Télécharger toutes les fiches (CSV)", data=prepare_csv(df), file_name="berlin_leads_complet.csv", mime="text/csv", use_container_width=True)
-    with c3:
-        if not public_mode:
-            include_contacts = st.checkbox("Inclure les contacts professionnels dans l'export privé", value=False)
-            if include_contacts:
-                st.download_button("↓ Export interne avec coordonnées", data=prepare_csv(view, include_contacts=True), file_name="berlin_leads_interne.csv", mime="text/csv", use_container_width=True)
-        else:
-            st.info("Mode public : les contacts individuels et emails directs ne sont pas exportés.")
+    if not public_mode:
+        with st.expander("Export interne avec coordonnées professionnelles (usage privé)", expanded=False):
+            st.caption("Conserver ce fichier en interne : il peut contenir des emails professionnels directs. Ne pas le publier sur GitHub.")
+            st.download_button(
+                "📥 Export interne avec coordonnées (CSV)",
+                data=prepare_csv(view, include_contacts=True), file_name="berlin_export_interne.csv",
+                mime="text/csv", use_container_width=True, key="explorer_internal_export",
+            )
+    else:
+        st.caption("Export public : les emails et contacts individuels ne sont pas inclus.")
 
     st.subheader("Fiche entreprise détaillée")
     if view.empty:
@@ -408,7 +579,7 @@ def quality():
     ]
     chart = go.Figure(go.Bar(
         x=[n for n,_ in cols], y=[int(v)/total*100 if total else 0 for _,v in cols],
-        marker_color=[TEAL, BLUE, AMBER, "#8A87E3", SLATE],
+        marker_color=[TEAL, BLUE, AMBER, "#7599CD", SLATE],
         text=[f"{int(v)}/{total}" for _,v in cols], textposition="outside"
     ))
     chart.update_yaxes(range=[0,112], ticksuffix="%")
@@ -424,8 +595,17 @@ def quality():
 
 df, public_mode, source_label = load_data()
 with st.sidebar:
-    st.markdown('**🏙️ BERLIN LEAD INTELLIGENCE**')
-    st.caption("Heidi Systems · Case Study")
+    st.markdown("**Export rapide**")
+    st.download_button(
+        "📥 Télécharger les résultats CSV",
+        data=prepare_csv(df), file_name="berlin_leads_resultats.csv",
+        mime="text/csv", type="primary", use_container_width=True,
+        key="sidebar_export_all",
+    )
+    st.caption("Téléchargement uniquement : aucune modification des données.")
+    st.divider()
+    st.markdown('<div class="section-eyebrow">RESEARCH WORKSPACE</div>', unsafe_allow_html=True)
+    st.caption("Navigation · Données consolidées · KPIs")
     st.divider()
     st.caption(f"Source : {source_label}")
     st.caption(f"Base : {len(df):,} candidats".replace(",", " "))
