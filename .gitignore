@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.streamlit/secrets.toml
+data/raw/*.json
+data/raw/*.csv
+data/processed/
+!data/raw/.gitkeep
+# Add data/public/leads_public.csv only after manual verification.
