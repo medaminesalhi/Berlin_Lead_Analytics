@@ -19,6 +19,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 RAW = ROOT / "data" / "raw"
 PROCESSED = ROOT / "data" / "processed"
+VALIDATION = ROOT / "data" / "validation"
+FALLBACK = RAW / "leads_all_previous.csv"
 
 # Search results pointing to directories, comparison articles or unrelated services
 # must NOT be treated as the official website of a distinct property manager.
@@ -404,9 +406,228 @@ def build_rows(checkpoint_rows: list[dict], directory_rows: list[dict]):
             "source_url": source_url,
             "review_status": "NOT_MANUALLY_VERIFIED", "notes": rec["notes"],
             "classification_method": rule,
+            "units_scope": "AI_EXTRACTED_UNCONFIRMED_SCOPE" if factors["units_confirmed"] is not None else "NOT_VERIFIED",
+            "units_validation": "LLM_QUOTE" if factors["units_confirmed"] is not None else "UNKNOWN",
+            "validation_status": "", "validation_sources": "", "validation_notes": "",
+            "contact_person": "", "review_date": "", "recommended_action": "",
+            "name_under_review": "", "activity_verified_description": "",
+            "berlin_verified_description": "", "kpi_explanation": "",
         })
     result.sort(key=lambda r: (0 if r["classification"] == "LIKELY" else 1 if r["classification"] == "REVIEW" else 2, -r["score_min"], r["company_name"].lower()))
     return result
+
+
+def load_review_file(path: Path) -> list[dict]:
+    """Read reviewed rows; pending entries do not override the source dataset."""
+    if not path.exists():
+        print(f"AVERTISSEMENT : vérifications non trouvées : {path}")
+        return []
+    df = pd.read_csv(path, sep=";", encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    return df.to_dict(orient="records")
+
+
+def load_previous_csv(path: Path) -> list[dict]:
+    """Fallback for users who only have the previously cleaned leads_all.csv."""
+    if not path.exists():
+        raise FileNotFoundError(f"Ni checkpoint ni fichier de base : {path}")
+    df = pd.read_csv(path, sep=";", encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    for field in ("score_min", "score_max", "completeness_pct"):
+        if field in df:
+            df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0).astype(int)
+    if "units_managed" in df:
+        df["units_managed"] = df["units_managed"].map(parse_units)
+    return df.to_dict(orient="records")
+
+
+def review_management_type(activities: str, fallback: str) -> str:
+    """Use human-reviewed service description; do not infer from a business name."""
+    s = clean(activities).lower()
+    if not s:
+        return fallback
+    residential = bool(re.search(r"\bweg\b|mietverwaltung|wohn|copropri|locative|sev", s))
+    commercial = bool(re.search(r"commercial|gewerbe", s))
+    if residential and commercial:
+        return "mixed"
+    if residential:
+        return "residential"
+    if commercial:
+        return "commercial"
+    if re.search(r"gestion de biens|gestion immobili|verwaltung", s):
+        return "management_unspecified"
+    return fallback
+
+
+def compute_score_from_fields(row: dict):
+    """KPI weights: fit 30, size 25, Berlin 15, metering 20, contact 10.
+
+    Unknown means 0..maximum; it never means proven negative.
+    """
+    low = high = 0
+    factor_points = {}
+    fit = {
+        "residential": 30, "mixed": 25, "management_unspecified": 20,
+        "commercial": 10, "sales_only": 0,
+    }
+    activity = clean(row.get("management_type")).lower()
+    if activity in fit:
+        low += fit[activity]; high += fit[activity]
+        factor_points["activity"] = fit[activity]
+    else:
+        high += 30; factor_points["activity"] = None
+
+    units = parse_units(row.get("units_managed"))
+    if units is not None and clean(row.get("units_scope", "")) != "NOT_VERIFIED":
+        pts = 25 if units > 1000 else 19 if units > 500 else 13 if units > 100 else 5 if units > 0 else 0
+        low += pts; high += pts; factor_points["units"] = pts
+    else:
+        high += 25; factor_points["units"] = None
+
+    berlin = clean(row.get("berlin_signal")).upper()
+    if berlin in {"OFFICIAL_PAGE", "WEB_REVIEW_BERLIN"}:
+        low += 15; high += 15; factor_points["berlin"] = 15
+    elif berlin == "DIRECTORY_ADDRESS":
+        low += 7; high += 15; factor_points["berlin"] = 7
+    else:
+        high += 15; factor_points["berlin"] = None
+
+    metering = clean(row.get("metering_signal")).upper()
+    if metering == "CONFIRMED_TEXT":
+        low += 20; high += 20; factor_points["metering"] = 20
+    elif metering == "BILLING_TEXT":
+        low += 12; high += 20; factor_points["metering"] = 12
+    else:
+        high += 20; factor_points["metering"] = None
+
+    email = clean(row.get("email"))
+    phone = clean(row.get("phone"))
+    if email:
+        x = 5 if GENERIC_EMAIL.search(email) else 8
+        low += x; high += 10; factor_points["contact"] = x
+    elif phone:
+        low += 3; high += 10; factor_points["contact"] = 3
+    else:
+        high += 10; factor_points["contact"] = None
+    return low, min(high, 100), factor_points
+
+
+def derive_priority(row: dict, score_min: int):
+    classification = clean(row.get("classification"))
+    if classification == "EXCLUDED":
+        return "EXCLUDED"
+    if classification == "REVIEW":
+        return "VERIFY_COMPANY"
+    if score_min >= 75:
+        return "HIGH"
+    if score_min >= 45:
+        return "MEDIUM"
+    return "RESEARCH_MORE"
+
+
+def merge_urls(*values: str) -> str:
+    found = set()
+    for value in values:
+        found.update(split_sources(value))
+    return " | ".join(sorted(found))
+
+
+def apply_web_validations(rows: list[dict], reviews: list[dict]) -> dict:
+    """Apply reviewed web corrections by exact official-domain match.
+
+    All rows remain visible. The 25 pending review rows never overwrite data.
+    Conflict and geographic reservations stay explicit and are not auto-approved.
+    """
+    by_domain = {}
+    for row in rows:
+        domain = host(row.get("website", "")) or clean(row.get("domain", ""))
+        if domain:
+            by_domain.setdefault(domain, []).append(row)
+    applied = []
+    unmatched = []
+    ignored_pending = 0
+    for review in reviews:
+        state = clean(review.get("validation_manuelle")).upper()
+        if not state.startswith("REVUE_WEB"):
+            ignored_pending += 1
+            continue
+        domain = host(review.get("website"))
+        choices = by_domain.get(domain, [])
+        if len(choices) != 1:
+            unmatched.append({"domain": domain, "name": clean(review.get("company_name")), "matches": len(choices)})
+            continue
+        row = choices[0]
+        legal = clean(review.get("controle_nom_legal")).upper()
+        berlin = clean(review.get("controle_berlin")).upper()
+        activity = clean(review.get("controle_activite")).upper()
+        units_state = clean(review.get("controle_unites")).upper()
+        legal_conflict = "CONFLIT" in legal
+        berlin_unconfirmed = berlin not in ("CONFIRMEE", "CONFIRME")
+
+        # Reviewed descriptions take precedence; a register conflict is NOT a verified legal name.
+        corrected_name = clean(review.get("nom_corrige"))
+        if legal == "CONFIRME" and valid_name(corrected_name):
+            row["company_name"] = corrected_name
+        row["name_under_review"] = corrected_name if legal_conflict else ""
+        row["activity_verified_description"] = clean(review.get("activite_verifiee"))
+        row["berlin_verified_description"] = clean(review.get("presence_berlin_verifiee"))
+        row["validation_sources"] = clean(review.get("sources_verification_web"))
+        row["source_url"] = merge_urls(row.get("source_url", ""), row["validation_sources"])
+        row["validation_notes"] = clean(review.get("remarques"))
+        row["validation_status"] = clean(review.get("statut_verification_web"))
+        row["recommended_action"] = clean(review.get("priorite_recommandee"))
+        row["contact_person"] = clean(review.get("contact_pertinent"))
+        row["review_status"] = "WEB_REVIEWED_WITH_RESERVATIONS" if (
+            legal_conflict or berlin_unconfirmed or "RÉSERVE" in row["validation_status"].upper()
+            or "RESERVE" in row["validation_status"].upper()
+        ) else "WEB_REVIEWED"
+        row["data_quality"] = row["review_status"]
+        row["review_date"] = "2026-11-10"  # provenance date in provided review file
+        public_email = clean(review.get("email_professionnel_public"))
+        if public_email:
+            row["email"] = public_email
+
+        if activity in ("CONFIRMEE", "CONFIRME"):
+            row["management_type"] = review_management_type(row["activity_verified_description"], row.get("management_type", "unknown"))
+        if berlin in ("CONFIRMEE", "CONFIRME"):
+            row["berlin_signal"] = "WEB_REVIEW_BERLIN"
+        else:
+            # A Berlin keyword alone is not confirmation of operations in Berlin.
+            row["berlin_signal"] = "WEB_NOT_CONFIRMED"
+
+        # Never confuse managed buildings, nationwide units and Berlin-only dwellings.
+        row["units_scope"] = clean(review.get("perimetre_unites")) or "NOT_VERIFIED"
+        verified_count = parse_units(review.get("unites_publiques_verifiees"))
+        if units_state.startswith("VERIFIE") and verified_count is not None:
+            row["units_managed"] = verified_count
+            row["units_validation"] = "WEB_REVIEWED_WITH_SCOPE"
+        elif units_state == "UNCONNU":
+            row["units_managed"] = None
+            row["units_validation"] = "UNKNOWN"
+        else:
+            row["units_validation"] = "NOT_VERIFIED"
+            row["units_managed"] = None
+
+        desc = row["activity_verified_description"].lower()
+        if re.search(r"chauffage|charges|abrechnung|compteur|consommation|verbrauch", desc):
+            if row.get("metering_signal") != "CONFIRMED_TEXT":
+                row["metering_signal"] = "BILLING_TEXT"
+        if legal_conflict:
+            row["classification"] = "REVIEW"
+            row["classification_reason"] = "Conflit de dénomination juridique à confirmer"
+        elif berlin_unconfirmed:
+            row["classification"] = "REVIEW"
+            row["classification_reason"] = "Activité berlinoise non confirmée par la revue web"
+        elif activity in ("CONFIRMEE", "CONFIRME"):
+            row["classification"] = "LIKELY"
+            row["classification_reason"] = "Gestion immobilière et présence Berlin revues sur des sources web"
+        low, high, factors = compute_score_from_fields(row)
+        row["score_min"], row["score_max"] = low, high
+        row["priority"] = derive_priority(row, low)
+        row["kpi_explanation"] = "; ".join(
+            f"{key}={'inconnu' if value is None else value}"
+            for key, value in factors.items()
+        )
+        applied.append(domain)
+    return {"applied": len(applied), "matched_domains": applied, "unmatched": unmatched, "pending_ignored": ignored_pending}
 
 
 def csv_safe(df: pd.DataFrame) -> pd.DataFrame:
@@ -440,20 +661,40 @@ def save_results(rows: list[dict], folder: Path):
         "ai_evidence_checked": int((df.ai_validation == "EVIDENCE_CHECKED").sum()),
         "companies_with_email": int(df.email.fillna("").astype(str).ne("").sum()),
         "unverified_directory_only": int((df.scrape_status == "NOT_SCRAPED").sum()),
-        "manual_review_remaining": int((df.review_status != "VERIFIED").sum()),
+        "web_reviewed": int(df.review_status.fillna("").astype(str).str.startswith("WEB_REVIEWED").sum()),
+        "manual_review_remaining": int((~df.review_status.fillna("").astype(str).str.startswith("WEB_REVIEWED")).sum()),
+        "units_reported": int(df.units_managed.map(parse_units).notna().sum()),
         "note": "Automated qualification only. Evidence status does not imply human verification."
     }
     (folder / "quality_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     return report
 
 
-def run(checkpoint: Path, directory: Path, out: Path):
-    cp = load_checkpoint(checkpoint)
-    dr = load_directory(directory)
-    rows = build_rows(cp, dr)
+def run(checkpoint: Path, directory: Path, out: Path, validation: Path = VALIDATION / "validation_prioritaire_35_mise_a_jour.csv", base_csv: Path | None = None):
+    if base_csv is not None or not checkpoint.exists():
+        base = base_csv or FALLBACK
+        print(f"Mode CSV déjà nettoyé : {base}")
+        rows = load_previous_csv(base)
+        cp_count = None
+        dr_count = None
+    else:
+        cp = load_checkpoint(checkpoint)
+        dr = load_directory(directory)
+        rows = build_rows(cp, dr)
+        cp_count = len(cp)
+        dr_count = len(dr)
+    reviews = load_review_file(validation)
+    review_summary = apply_web_validations(rows, reviews)
     report = save_results(rows, out)
-    print(f"Checkpoint Stagehand: {len(cp)} candidats")
-    print(f"Annuaire initial: {len(dr)} candidats")
+    report["validation_integration"] = review_summary
+    report["source_mode"] = "checkpoint_and_directory" if cp_count is not None else "previous_cleaned_csv"
+    report["methodology_version"] = "2.0"
+    (out / "quality_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Checkpoint Stagehand: {cp_count if cp_count is not None else 'non utilisé'}")
+    print(f"Annuaire initial: {dr_count if dr_count is not None else 'déjà fusionné'}")
+    print(f"Vérifications web appliquées: {review_summary['applied']} / {len(reviews)}")
+    if review_summary["unmatched"]:
+        print(f"ATTENTION : {len(review_summary['unmatched'])} vérifications sans correspondance unique")
     print(f"Entreprises/candidats fusionnés: {report['unique_candidates']}")
     print(f"Classification: {report['classification']}")
     print(f"Fichiers créés dans : {out}")
@@ -465,5 +706,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=Path, default=RAW / "checkpoint_latest.json")
     parser.add_argument("--directory", type=Path, default=RAW / "directory_candidates.csv")
     parser.add_argument("--out", type=Path, default=PROCESSED)
+    parser.add_argument("--validation", type=Path, default=VALIDATION / "validation_prioritaire_35_mise_a_jour.csv")
+    parser.add_argument("--base-csv", type=Path, help="CSV leads_all déjà produit (alternative au checkpoint)")
     args = parser.parse_args()
-    run(args.checkpoint, args.directory, args.out)
+    run(args.checkpoint, args.directory, args.out, args.validation, args.base_csv)
